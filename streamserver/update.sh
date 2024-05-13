@@ -43,5 +43,6 @@ sudo nginx -s reload
 popd
 
 ufw allow 8453
+ufw allow 80
 
 echo "---Finished---"
