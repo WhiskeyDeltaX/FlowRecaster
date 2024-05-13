@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Load UUID from the configuration file
-source /flowrecaster/rtmp_auth.conf
+source /flowrecaster/streamserver/rtmp_auth.conf
 
 # Check if the UUID matches
 if [ "$RTMP_CLIENT_UUID" = "none" ]; then
