@@ -19,15 +19,13 @@ chmod +x update.sh
 ./update.sh {uuid} {host_url}
 """
 
-# Encode the script
-encoded_user_data = base64.b64encode(user_data_script.encode()).decode('utf-8')
-
 router = APIRouter()
 
 VULTR_API_KEY = os.getenv('VULTR_API_KEY', "Z123123123123123123123123123")
-PUBLIC_IP = os.getenv('PUBLIC_IP', "127.0.0.1")
+SERVER_HOST_URL = os.getenv('HOST_URL', "https://flowrecaster") # This is for the RTMP clients to broadcast back to us
 SSH_KEY_PATH = os.getenv('SSH_KEY_PATH', './server@flowrecaster.com.pem')
 VULTR_V4_SUBNET = os.getenv('VULTR_V4_SUBNET', "10.69.2.0")
+PUBLIC_IP = os.getenv('PUBLIC_IP', "127.0.0.1")
 
 def generate_ssh_key():
     """Generate an RSA key pair and save it locally if not exists."""
@@ -87,7 +85,7 @@ async def get_or_create_vultr_ssh_key(public_key):
         key = response.json()
         return key['ssh_key']['id']
 
-async def create_or_get_firewall_group(vpc_ip_block: str):
+async def create_or_get_firewall_group(vpc_ip_block: str, subnet_size: int):
     """Check for the 'flowrecaster' firewall group and create it if it does not exist."""
     headers = {"Authorization": f"Bearer {VULTR_API_KEY}"}
     async with httpx.AsyncClient() as client:
@@ -127,32 +125,32 @@ async def create_or_get_firewall_group(vpc_ip_block: str):
             )
             rule_response.raise_for_status()
 
-        await ensure_rtmp_firewall_rules(client, firewall_group_id, "0.0.0.0", 0, headers)
+        await ensure_firewall_rules(client, firewall_group_id, vpc_ip_block, subnet_size, headers)
 
         return firewall_group_id
 
-async def ensure_rtmp_firewall_rules(client, firewall_group_id, ip_block, subnet_size, headers):
+async def ensure_firewall_rules(client, firewall_group_id, ip_block, subnet_size, headers):
     """Ensure that the firewall rules allow TCP and UDP on port 1385 for the given IP block."""
     rules_response = await client.get(f"https://api.vultr.com/v2/firewalls/{firewall_group_id}/rules", headers=headers)
     rules_response.raise_for_status()
     rules = rules_response.json()['firewall_rules']
+    
+    # Define rules to ensure based on IP and ports
+    rules_to_ensure = [
+        (80, 'tcp', public_ip, '32'),   # HTTP port for PUBLIC_IP
+        (22, 'tcp', public_ip, '32'),   # SSH port for PUBLIC_IP
+        (8453, 'tcp', ip_block, subnet_size)  # RTMP specific port, for given ip_block
+    ]
 
-    # Check existing rules for the required access
-    tcp_rule_exists = udp_rule_exists = False
-    for rule in rules:
-        if rule['ip_type'] == 'v4' and rule['subnet'] == ip_block and rule['port'] == "8453":
-            if rule['protocol'] == 'tcp':
-                tcp_rule_exists = True
-            elif rule['protocol'] == 'udp':
-                udp_rule_exists = True
+    # Check and add missing rules
+    for port, protocol, ip, subnet in rules_to_ensure:
+        rule_exists = any(rule['ip_type'] == 'v4' and rule['subnet'] == ip and rule['subnet_size'] == subnet and
+                          rule['port'] == str(port) and rule['protocol'] == protocol for rule in existing_rules)
+        
+        if not rule_exists:
+            await add_firewall_rule(client, firewall_group_id, ip, subnet, protocol, port, headers)
 
-    # Add missing rules
-    if not tcp_rule_exists:
-        await add_rtmp_firewall_rule(client, firewall_group_id, ip_block, subnet_size, 'tcp', headers)
-    if not udp_rule_exists:
-        await add_rtmp_firewall_rule(client, firewall_group_id, ip_block, subnet_size, 'udp', headers)
-
-async def add_rtmp_firewall_rule(client, firewall_group_id, ip_block, subnet_size, protocol, headers):
+async def add_firewall_rule(client, firewall_group_id, ip_block, subnet_size, protocol, port, headers):
     """Add a firewall rule for the specified protocol and IP block."""
     await client.post(
         f"https://api.vultr.com/v2/firewalls/{firewall_group_id}/rules",
@@ -162,7 +160,7 @@ async def add_rtmp_firewall_rule(client, firewall_group_id, ip_block, subnet_siz
             "protocol": protocol,
             "subnet": ip_block,
             "subnet_size": subnet_size,  # Adjust subnet size based on your VPC configuration
-            "port": "8453",
+            "port": port,
             "action": "accept"
         }
     )
@@ -216,9 +214,7 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
     public_key = generate_ssh_key()
     ssh_key_id = await get_or_create_vultr_ssh_key(public_key)
     print("SSH key id", ssh_key_id)
-    vpc = await get_or_create_vpc(region, server.workspace)
-    print("VPC", vpc)
-    firewall_group_id = await create_or_get_firewall_group(vpc["ip_block"])
+    firewall_group_id = await create_or_get_firewall_group("0.0.0.0", 0)
     print("FWG", firewall_group_id)
     plan = "vc2-1c-1gb"
 
@@ -234,9 +230,8 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                 "sshkey_id": [ssh_key_id],
                 "firewall_group_id": firewall_group_id,
                 "tags": [server.workspace],
-                "attach_vpc2": [vpc["id"]],
                 "user_data": base64.b64encode(user_data_script.format(
-                    uuid=server.uuid, host_url=f"http://{PUBLIC_IP}:5000"
+                    uuid=server.uuid, host_url=SERVER_HOST_URL
                 ).encode()).decode('utf-8')
             },
             headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
@@ -258,8 +253,8 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
         server.operational = True
         server.date_modified = datetime.datetime.now()
         server.firewall_group = firewall_group_id
-        server.vpc_id = vpc["id"]
-        server.ip_block = vpc["ip_block"]
+        # server.vpc_id = vpc["id"]
+        # server.ip_block = vpc["ip_block"]
 
         server.ip = None
         server.online = False
