@@ -9,6 +9,17 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from database import stream_servers_table
+import base64
+
+# Define the user data script
+user_data_script = """#!/bin/bash
+wget https://raw.githubusercontent.com/WhiskeyDeltaX/FlowRecaster/main/streamserver/update.sh
+chmod +x update.sh
+./update.sh {uuid}
+"""
+
+# Encode the script
+encoded_user_data = base64.b64encode(user_data_script.encode()).decode('utf-8')
 
 router = APIRouter()
 
@@ -221,7 +232,10 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                 "sshkey_id": [ssh_key_id],
                 "firewall_group_id": firewall_group_id,
                 "tags": [server.workspace],
-                "attach_vpc2": [vpc["id"]]
+                "attach_vpc2": [vpc["id"]],
+                "user_data": encoded_user_data = base64.b64encode(user_data_script.format(
+                    uuid=server.uuid
+                ).encode()).decode('utf-8')
             },
             headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
         )
