@@ -10,10 +10,14 @@ import psutil
 from datetime import datetime
 import subprocess
 import json
+import yt_dlp  # This is the module for downloading videos
 
 load_dotenv()  # Load environment variables
 
 app = FastAPI()
+
+class YouTubeDownloadRequest(BaseModel):
+    youtube_url: str
 
 # Application version
 __version__ = "1.0.0"
@@ -93,27 +97,56 @@ async def notify_server_online():
             print(f"Failed to notify server: {e}")
 
 async def check_stream():
-    global ffmpeg_process, failure_count
+    global ffmpeg_process, config, failure_count
+    last_known_source = config['active_source']  # Track the last known active source
+
     while True:
-        await asyncio.sleep(10)  # Non-blocking wait
-        # if ffmpeg_process and ffmpeg_process.poll() is not None:
-        #     print("_Failure")
-        #     failure_count += 1
-        #     if failure_count >= FAILURE_THRESHOLD:
-        #         print("Stream failure detected, switching to backup")
-        #         await report_failure()
-        #         switch_to_backup_stream()
-        # else:
-        #     failure_count = 0  # Reset failure count if stream is active
+        await asyncio.sleep(5)  # Non-blocking wait
+        current_source = config['active_source']
+        current_url = config[f'{current_source}_url']
+
+        if current_source != 'mp4':
+            stream_live = await is_stream_live(current_url)
+            if not stream_live:
+                print(f"{current_source} failure detected, switching to backup mp4")
+                failure_count += 1
+                if failure_count >= FAILURE_THRESHOLD:
+                    switch_to_backup_stream()
+                    await report_failure()
+                    
+                    # Check if the stream comes back online
+                    while not await is_stream_live(current_url):
+                        await asyncio.sleep(5)
+                        # Check if the active source has been changed externally
+                        if config['active_source'] != last_known_source:
+                            print(f"Active source changed externally from {last_known_source} to {config['active_source']}")
+                            break  # Break the inner loop to continue with the main loop
+                            
+                    if config['active_source'] == last_known_source:
+                        # If the loop exits naturally, the original stream is back
+                        print(f"{current_source} is back online, switching back from backup mp4")
+                        switch_to_original_stream(current_source)
+                        failure_count = 0  # Reset failure count after recovery
+
+            else:
+                failure_count = 0  # Reset failure count if stream is active
+
+        # Update last known source for the next iteration
+        last_known_source = config['active_source']
+
+def switch_to_backup_stream():
+    start_youtube_stream_directly(config['mp4_url'])
+
+def switch_to_original_stream(original_stream):
+    global config
+    config['active_source'] = original_stream
+    save_config(config)
+    start_youtube_stream_directly(config[f'{original_stream}_url'])
 
 async def report_failure():
     print("Report Failure")
     async with httpx.AsyncClient() as client:
         await client.post(f'{config["server_host"]}/api/v1/report_failure', json={"stream_url": os.getenv("STREAM1_URL"), "failure_count": failure_count})
-
-def switch_to_backup_stream():
-    backup_stream_url = os.getenv("STREAM2_URL")
-    start_youtube_stream_directly(backup_stream_url)
 
 async def report_system_status():
     while True:
@@ -215,6 +248,32 @@ async def set_stream_url(stream_data: BaseModel):
         save_config(config)
         return {"message": f"{stream_data.identifier} URL updated"}
     raise HTTPException(status_code=404, detail="Invalid stream identifier")
+
+@app.post("/download-youtube-video/")
+async def download_youtube_video(request: YouTubeDownloadRequest):
+    # Specify the output template and options for yt-dlp
+    ydl_opts = {
+        'format': 'best',
+        'outtmpl': '/yt_video.mp4',  # Set output file template
+        'merge_output_format': 'mp4',  # Ensure the output is MP4 if video and audio are separate
+    }
+
+    try:
+        # Use yt-dlp to download the video
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([request.youtube_url])
+
+        # Update the configuration to use the new MP4 file
+        global config
+        config['mp4_url'] = '/yt_video.mp4'
+        save_config(config)
+
+        # Start streaming the newly downloaded video
+        start_youtube_stream_directly(config['mp4_url'])
+
+        return {"message": "YouTube video downloaded and streaming started", "mp4_url": config['mp4_url']}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/version/")
 async def get_version():
