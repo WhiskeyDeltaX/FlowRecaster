@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Body, HTTPException, Depends, status
+from fastapi import APIRouter, Body, HTTPException, Depends, status, Request
+from fastapi.responses import JSONResponse
 import httpx
-from models import StreamServer
+from models import StreamServer, ServerStatus
 from security import get_current_user
 from uuid import uuid4, UUID
 import datetime
@@ -126,11 +127,11 @@ async def create_or_get_firewall_group(vpc_ip_block: str):
             )
             rule_response.raise_for_status()
 
-        await ensure_rtmp_firewall_rules(client, firewall_group_id, vpc_ip_block, headers)
+        await ensure_rtmp_firewall_rules(client, firewall_group_id, "0.0.0.0", 0, headers)
 
         return firewall_group_id
 
-async def ensure_rtmp_firewall_rules(client, firewall_group_id, ip_block, headers):
+async def ensure_rtmp_firewall_rules(client, firewall_group_id, ip_block, subnet_size, headers):
     """Ensure that the firewall rules allow TCP and UDP on port 1385 for the given IP block."""
     rules_response = await client.get(f"https://api.vultr.com/v2/firewalls/{firewall_group_id}/rules", headers=headers)
     rules_response.raise_for_status()
@@ -139,7 +140,7 @@ async def ensure_rtmp_firewall_rules(client, firewall_group_id, ip_block, header
     # Check existing rules for the required access
     tcp_rule_exists = udp_rule_exists = False
     for rule in rules:
-        if rule['ip_type'] == 'v4' and rule['subnet'] == ip_block and rule['port'] == "1385":
+        if rule['ip_type'] == 'v4' and rule['subnet'] == ip_block and rule['port'] == "8453":
             if rule['protocol'] == 'tcp':
                 tcp_rule_exists = True
             elif rule['protocol'] == 'udp':
@@ -147,11 +148,11 @@ async def ensure_rtmp_firewall_rules(client, firewall_group_id, ip_block, header
 
     # Add missing rules
     if not tcp_rule_exists:
-        await add_rtmp_firewall_rule(client, firewall_group_id, ip_block, 'tcp', headers)
+        await add_rtmp_firewall_rule(client, firewall_group_id, ip_block, subnet_size, 'tcp', headers)
     if not udp_rule_exists:
-        await add_rtmp_firewall_rule(client, firewall_group_id, ip_block, 'udp', headers)
+        await add_rtmp_firewall_rule(client, firewall_group_id, ip_block, subnet_size, 'udp', headers)
 
-async def add_rtmp_firewall_rule(client, firewall_group_id, ip_block, protocol, headers):
+async def add_rtmp_firewall_rule(client, firewall_group_id, ip_block, subnet_size, protocol, headers):
     """Add a firewall rule for the specified protocol and IP block."""
     await client.post(
         f"https://api.vultr.com/v2/firewalls/{firewall_group_id}/rules",
@@ -160,8 +161,8 @@ async def add_rtmp_firewall_rule(client, firewall_group_id, ip_block, protocol, 
             "ip_type": "v4",
             "protocol": protocol,
             "subnet": ip_block,
-            "subnet_size": 24,  # Adjust subnet size based on your VPC configuration
-            "port": "1385",
+            "subnet_size": subnet_size,  # Adjust subnet size based on your VPC configuration
+            "port": "8453",
             "action": "accept"
         }
     )
@@ -235,7 +236,7 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                 "tags": [server.workspace],
                 "attach_vpc2": [vpc["id"]],
                 "user_data": base64.b64encode(user_data_script.format(
-                    uuid=server.uuid, host_url=f"{PUBLIC_IP}:5000"
+                    uuid=server.uuid, host_url=f"http://{PUBLIC_IP}:5000"
                 ).encode()).decode('utf-8')
             },
             headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
@@ -260,7 +261,8 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
         server.vpc_id = vpc["id"]
         server.ip_block = vpc["ip_block"]
 
-        server.ip = server_data['instance']['main_ip']
+        server.ip = None
+        server.online = False
         server.service_uuid = server_data['instance']['id']
         server.internal_ip = server_data['instance']['internal_ip']
 
@@ -281,3 +283,59 @@ async def delete_streamserver(server_id: str, user: dict = Depends(get_current_u
         response.raise_for_status()
         await stream_servers_table.delete_one({"uuid": str(server_id)})
         return {"message": "Server deleted"}
+
+@router.post("/streamservers/server_online")
+async def server_online(request: Request):
+    data = await request.json()
+    server_uuid = data.get("server_uuid")
+    
+    if not server_uuid:
+        raise HTTPException(status_code=400, detail="Server UUID is required.")
+
+    # Retrieve the server document
+    server = await stream_servers_table.find_one({"uuid": server_uuid})
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found.")
+
+    # Update server data
+    update_data = {
+        "$set": {
+            "last_heartbeat": datetime.datetime.utcnow(),
+            "last_boot": datetime.datetime.utcnow(),
+            "ip": request.client.host,
+            "online": True
+        }
+    }
+
+    # If it's the first time this server is checking in
+    if server.get("first_heartbeat") is None:
+        update_data["$set"]["first_heartbeat"] = datetime.datetime.utcnow()
+
+    # Update the server entry in MongoDB
+    result = await stream_servers_table.update_one({"uuid": server_uuid}, update_data)
+
+    print("Server Online", server)
+
+    if result.modified_count == 1:
+        return JSONResponse(status_code=200, content={"message": "Server status updated successfully."})
+    else:
+        return JSONResponse(status_code=500, content={"message": "Failed to update server status."})
+
+@router.post("/streamservers/report_status")
+async def report_status(status: ServerStatus):
+    # Check if the server_uuid exists in the stream_servers_table
+    server = await stream_servers_table.find_one({"uuid": status.server_uuid})
+    if not server or not server["online"]:
+        raise HTTPException(status_code=404, detail="Server UUID not found")
+
+    # Prepare the status document to insert into MongoDB
+    status = status.dict()
+    status['date_created'] = datetime.datetime.utcnow()  # Add a timestamp
+    status['uuid'] = str(uuid4())
+
+    print("Logged status report", status)
+
+    # # Insert the status document into the stream_servers_status_table
+    # stream_servers_status_table.insert_one(status)
+
+    return {"message": "Status reported successfully"}

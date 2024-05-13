@@ -23,3 +23,20 @@ class StreamServer(BaseModel):
     ip_block: str = None
     internal_ip: str = None
     os: str = None
+    online: bool = False
+
+    last_heartbeat: datetime = None
+    last_boot: datetime = None
+    first_heartbeat: datetime = None
+
+class ServerStatus(BaseModel):
+    server_uuid: str
+    date_created: datetime = Field(default_factory=datetime.utcnow)
+    uuid:  str = None
+    cpu_usage: float
+    ram_usage: float
+    bytes_sent: int
+    bytes_recv: int
+    selected_source: str
+    youtube_stream_key: str
+    ffmpeg_active: bool = False

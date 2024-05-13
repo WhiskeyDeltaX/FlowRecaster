@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 import asyncio
 import httpx  # to send async HTTP requests
 import os.path
+import psutil
+from datetime import datetime
 
 load_dotenv()  # Load environment variables
 
@@ -20,13 +22,13 @@ config_file = "stream_config.json"
 def load_config():
     if os.path.isfile("/flowrecaster_uuid.txt"):
         with open("/flowrecaster_uuid.txt", 'r') as file:
-            server_uuid = file.read()
+            server_uuid = file.read().strip()
     else:
         server_uuid = "None"
 
-    if os.path.isfile("/flowrecaster_uuid.txt"):
+    if os.path.isfile("/flowrecaster_host.txt"):
         with open("/flowrecaster_host.txt", 'r') as file:
-            server_host = file.read()
+            server_host = file.read().strip()
     else:
         server_host = "http://localhost"
 
@@ -43,7 +45,7 @@ def load_config():
             "mp4_url": os.getenv("MP4_URL"),
             "active_source": "stream1",
             "secret_uuid": os.getenv("SECRET_UUID", "none"),
-            "server_uuid": server_uuid
+            "server_uuid": server_uuid,
             "server_host": server_host
         }
 
@@ -67,11 +69,25 @@ class StreamData(BaseModel):
 async def startup_event():
     asyncio.create_task(check_stream())
     asyncio.create_task(report_system_status())
+    await notify_server_online()
 
 @app.on_event("shutdown")
 async def shutdown_event():
     if ffmpeg_process:
         ffmpeg_process.terminate()
+
+async def notify_server_online():
+    """ Notify the central server that this node is online. """
+    payload = {
+        "server_uuid": config["server_uuid"]
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(f'{config["server_host"]}/api/v1/streamservers/server_online', json=payload)
+            response.raise_for_status()  # Will raise an exception for 4XX/5XX responses
+        except httpx.HTTPError as e:
+            print(f"Failed to notify server: {e}")
 
 async def check_stream():
     global ffmpeg_process, failure_count
@@ -90,7 +106,7 @@ async def check_stream():
 async def report_failure():
     print("Report Failure")
     async with httpx.AsyncClient() as client:
-        await client.post(f'{os.getenv("CENTRAL_SERVER_ADDRESS")}/report_failure', json={"stream_url": os.getenv("STREAM1_URL"), "failure_count": failure_count})
+        await client.post(f'{config["server_host"]}/api/v1/report_failure', json={"stream_url": os.getenv("STREAM1_URL"), "failure_count": failure_count})
 
 def switch_to_backup_stream():
     backup_stream_url = os.getenv("STREAM2_URL")
@@ -98,10 +114,41 @@ def switch_to_backup_stream():
 
 async def report_system_status():
     while True:
-        await asyncio.sleep(60)  # Every minute
-        print("Report System Status")
+        await asyncio.sleep(30)  # Report every minute
+        print("Reporting System Status")
+        
+        # Collect system metrics
+        cpu_usage = psutil.cpu_percent(interval=1)
+        ram_usage = psutil.virtual_memory().percent
+        net_io = psutil.net_io_counters()
+        bytes_sent = net_io.bytes_sent
+        bytes_recv = net_io.bytes_recv
+        
+        # Check FFmpeg stream status
+        ffmpeg_active = ffmpeg_process is not None and ffmpeg_process.poll() is None
+        
+        # Prepare the payload
+        payload = {
+            "server_uuid": config["server_uuid"],
+            "cpu_usage": cpu_usage,
+            "ram_usage": ram_usage,
+            "bytes_sent": bytes_sent,
+            "bytes_recv": bytes_recv,
+            "selected_source": config["active_source"],
+            "youtube_stream_key": os.getenv("YOUTUBE_STREAM_KEY", ""),
+            "ffmpeg_active": ffmpeg_active
+        }
+
+        print("Sending payload", payload)
+        
+        # Send the status to the central server
         async with httpx.AsyncClient() as client:
-            await client.post(f'{os.getenv("CENTRAL_SERVER_ADDRESS")}/report_status', json={"status": "streaming"})
+            try:
+                response = await client.post(f'{config["server_host"]}/api/v1/streamservers/report_status', json=payload)
+                response.raise_for_status()  # Will raise an exception for 4XX/5XX responses
+                print(f"Status reported successfully at {datetime.now()}")
+            except httpx.HTTPError as e:
+                print(f"Failed to report status: {e}")
 
 def start_youtube_stream_directly(stream_url):
     global ffmpeg_process
@@ -149,7 +196,7 @@ async def get_version():
 @app.post("/validate_publish/")
 async def validate_stream(name: str = Form(...)):
     # Implement your authentication logic here
-    if config["secret_uuid"] != "none" and name == config["secret_uuid"]:
+    if name == config["server_uuid"]:
         return {"success": True}
     else:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized")

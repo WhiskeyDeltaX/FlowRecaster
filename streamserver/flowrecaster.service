@@ -7,7 +7,7 @@ User=flow
 Group=www-data
 WorkingDirectory=/flowrecaster/streamserver/server
 Environment="PATH=/usr/bin/python3"
-ExecStart=/usr/local/bin/gunicorn --workers 3 --bind unix:/flowrecaster/streamserver/server/server.sock -m 007 --worker-class uvicorn.workers.UvicornWorker app:app
+ExecStart=/usr/local/bin/gunicorn --workers 1 --bind unix:/flowrecaster/streamserver/server/server.sock -m 007 --worker-class uvicorn.workers.UvicornWorker app:app
 
 [Install]
 WantedBy=multi-user.target
