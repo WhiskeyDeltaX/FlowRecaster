@@ -68,13 +68,14 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
     VULTR_API_KEY=Z123123123123123123123123123
     PUBLIC_IP=127.0.0.1
     SSH_KEY_PATH=./server@flowrecaster.com.pem
+    SERVER_HOST_URL=https://flowrecaster.com
    ```
    
    Add the following to your Nginx configuration `/etc/nginx/sites-enabled/flowrecaster.com`:
    ```
    server {
        listen 80;
-       server_name flowrecaster.com;
+       server_name flowrecaster.com www.flowrecaster.com;
 
        location / {
            root /var/www/html/flowrecaster.com;
@@ -92,7 +93,18 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
    }
    ```
 
-   Run certbot.
+   Run certbot
+   ```
+   # Install Certbot and its Nginx plugin
+   sudo apt install certbot python3-certbot-nginx
+   
+   # Configure SSL for your domain
+   sudo certbot --nginx -d flowrecaster.com -d www.flowrecaster.com
+   
+   # Enable automatic renewal of SSL certificates
+   sudo systemctl enable certbot-renew.timer
+   sudo systemctl start certbot-renew.timer
+   ```
 
 5. Create a gunicorn service:
    ```bash
