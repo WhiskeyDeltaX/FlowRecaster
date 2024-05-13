@@ -9,8 +9,9 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
 - **webclient**: React-based frontend for interacting with the webserver, offering a Bootstrap-based user interface.
 
 ## Prerequisites
-- Python 3.8+
-- Node.js 14+
+- Debian-ish Web Server running Python 3.8+
+- Locally Node.js 14+
+- Vultr account
 
 ## Setup
 ### Domain Configuration
