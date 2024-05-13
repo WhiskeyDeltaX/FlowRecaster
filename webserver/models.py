@@ -40,3 +40,5 @@ class ServerStatus(BaseModel):
     selected_source: str
     youtube_stream_key: str
     ffmpeg_active: bool = False
+    stream1_live: bool = False
+    stream2_live: bool = False

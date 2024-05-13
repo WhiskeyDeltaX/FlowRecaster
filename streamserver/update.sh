@@ -33,7 +33,7 @@ chown flow:flow /flowrecaster_host.txt
 cp flowrecaster.service /etc/systemd/system/flowrecaster.service
 sudo systemctl daemon-reload
 sudo systemctl enable flowrecaster
-sudo systemctl stop flowrecaster
+sudo systemctl restart flowrecaster
 
 cp nginx.conf /etc/nginx/nginx.conf
 

@@ -8,6 +8,8 @@ import httpx  # to send async HTTP requests
 import os.path
 import psutil
 from datetime import datetime
+import subprocess
+import json
 
 load_dotenv()  # Load environment variables
 
@@ -37,14 +39,15 @@ def load_config():
             j = json.load(file)
             j["server_uuid"] = server_uuid
             j["server_host"] = server_host
+            j["stream1_url"] = f"rtmp://localhost:8453/live/{server_uuid}"
+            j["stream1_url"] = f"video.mp4"
             return j
     except:
         return {
-            "stream1_url": os.getenv("STREAM1_URL"),
+            "stream1_url": f"rtmp://localhost:8453/live/{server_uuid}",
             "stream2_url": os.getenv("STREAM2_URL"),
-            "mp4_url": os.getenv("MP4_URL"),
+            "mp4_url": os.getenv("MP4_URL", "video.mp4"),
             "active_source": "stream1",
-            "secret_uuid": os.getenv("SECRET_UUID", "none"),
             "server_uuid": server_uuid,
             "server_host": server_host
         }
@@ -60,7 +63,7 @@ print("Config", config)
 # Global variables to manage the stream
 ffmpeg_process = None
 failure_count = 0
-FAILURE_THRESHOLD = 6  # Number of allowed consecutive failures
+FAILURE_THRESHOLD = 3  # Number of allowed consecutive failures
 
 class StreamData(BaseModel):
     identifier: str  # stream1, stream2, or mp4
@@ -93,15 +96,15 @@ async def check_stream():
     global ffmpeg_process, failure_count
     while True:
         await asyncio.sleep(10)  # Non-blocking wait
-        if ffmpeg_process and ffmpeg_process.poll() is not None:
-            print("_Failure")
-            failure_count += 1
-            if failure_count >= FAILURE_THRESHOLD:
-                print("Stream failure detected, switching to backup")
-                await report_failure()
-                switch_to_backup_stream()
-        else:
-            failure_count = 0  # Reset failure count if stream is active
+        # if ffmpeg_process and ffmpeg_process.poll() is not None:
+        #     print("_Failure")
+        #     failure_count += 1
+        #     if failure_count >= FAILURE_THRESHOLD:
+        #         print("Stream failure detected, switching to backup")
+        #         await report_failure()
+        #         switch_to_backup_stream()
+        # else:
+        #     failure_count = 0  # Reset failure count if stream is active
 
 async def report_failure():
     print("Report Failure")
@@ -125,7 +128,10 @@ async def report_system_status():
         bytes_recv = net_io.bytes_recv
         
         # Check FFmpeg stream status
-        ffmpeg_active = ffmpeg_process is not None and ffmpeg_process.poll() is None
+        ffmpeg_alive = not (ffmpeg_process and ffmpeg_process.poll() is not None)
+
+        stream1_live = await is_stream_live(config['stream1_url'])
+        stream2_live = await is_stream_live(config['stream2_url'])
         
         # Prepare the payload
         payload = {
@@ -136,7 +142,9 @@ async def report_system_status():
             "bytes_recv": bytes_recv,
             "selected_source": config["active_source"],
             "youtube_stream_key": os.getenv("YOUTUBE_STREAM_KEY", ""),
-            "ffmpeg_active": ffmpeg_active
+            "ffmpeg_alive": ffmpeg_alive,
+            "stream1_live": stream1_live,
+            "stream2_live": stream2_live,
         }
 
         print("Sending payload", payload)
@@ -150,13 +158,32 @@ async def report_system_status():
             except httpx.HTTPError as e:
                 print(f"Failed to report status: {e}")
 
+async def is_stream_live(stream_url):
+    """ Check if the given stream URL is live using ffprobe. """
+    try:
+        # Run ffprobe to check the stream status
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", 
+             "default=noprint_wrappers=1:nokey=1", stream_url],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=10  # Set a timeout to avoid hanging
+        )
+        # If ffprobe runs successfully, the stream is live
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        # If ffprobe times out, the stream is not live
+        return False
+    except:
+        return False
+
 def start_youtube_stream_directly(stream_url):
     global ffmpeg_process
     if ffmpeg_process:
         ffmpeg_process.terminate()
     youtube_key = os.getenv("YOUTUBE_STREAM_KEY")
-    command = f'ffmpeg -i {stream_url} -c copy -f flv rtmp://a.rtmp.youtube.com/live2/{youtube_key}'
-    ffmpeg_process = Popen(command.split(), stdout=PIPE, stderr=PIPE)
+    command = f'ffmpeg -re -i {stream_url} -c copy -f flv rtmp://a.rtmp.youtube.com/live2/{youtube_key}'
+    ffmpeg_process = Popen(command.split(), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True)
 
 @app.get("/start-youtube-stream/")
 async def start_youtube_stream():
@@ -164,8 +191,8 @@ async def start_youtube_stream():
     start_youtube_stream_directly(source_url)
     return {"message": "YouTube stream started"}
 
-@app.get("/end-youtube-stream/")
-async def end_youtube_stream():
+@app.get("/stop-youtube-stream/")
+async def stop_youtube_stream():
     global ffmpeg_process
     if ffmpeg_process:
         ffmpeg_process.terminate()
