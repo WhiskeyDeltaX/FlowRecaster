@@ -10,7 +10,7 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
 
 ## Prerequisites
 - Debian-ish Web Server running Python 3.8+
-- Locally Node.js 14+
+- Locally (or on web server) Node.js 14+
 - Vultr account
 
 ## Setup
