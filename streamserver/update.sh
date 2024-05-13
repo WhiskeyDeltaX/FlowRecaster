@@ -1,7 +1,7 @@
 #!/bin/bash
 
 server_uuid="$1"
-
+server_host="$2"
 
 echo "---Updating---"
 sudo apt update
@@ -26,6 +26,9 @@ chown flow:flow /flowrecaster/streamserver/server
 
 echo $server_uuid > /flowrecaster_uuid.txt
 chown flow:flow /flowrecaster_uuid.txt
+
+echo $server_host > /flowrecaster_host.txt
+chown flow:flow /flowrecaster_host.txt
 
 cp flowrecaster.service /etc/systemd/system/flowrecaster.service
 sudo systemctl daemon-reload

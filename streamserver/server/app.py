@@ -5,6 +5,7 @@ import os
 from dotenv import load_dotenv
 import asyncio
 import httpx  # to send async HTTP requests
+import os.path
 
 load_dotenv()  # Load environment variables
 
@@ -17,14 +18,25 @@ __version__ = "1.0.0"
 config_file = "stream_config.json"
 
 def load_config():
-    with open("/flowrecaster_uuid.txt", 'r') as file:
-        server_uuid = file.read()
+    if os.path.isfile("/flowrecaster_uuid.txt"):
+        with open("/flowrecaster_uuid.txt", 'r') as file:
+            server_uuid = file.read()
+    else:
+        server_uuid = "None"
+
+    if os.path.isfile("/flowrecaster_uuid.txt"):
+        with open("/flowrecaster_host.txt", 'r') as file:
+            server_host = file.read()
+    else:
+        server_host = "http://localhost"
 
     try:
         with open(config_file, 'r') as file:
             j = json.load(file)
             j["server_uuid"] = server_uuid
-    except FileNotFoundError:
+            j["server_host"] = server_host
+            return j
+    except:
         return {
             "stream1_url": os.getenv("STREAM1_URL"),
             "stream2_url": os.getenv("STREAM2_URL"),
@@ -32,6 +44,7 @@ def load_config():
             "active_source": "stream1",
             "secret_uuid": os.getenv("SECRET_UUID", "none"),
             "server_uuid": server_uuid
+            "server_host": server_host
         }
 
 def save_config(config):
@@ -39,6 +52,8 @@ def save_config(config):
         json.dump(config, file)
 
 config = load_config()
+
+print("Config", config)
 
 # Global variables to manage the stream
 ffmpeg_process = None

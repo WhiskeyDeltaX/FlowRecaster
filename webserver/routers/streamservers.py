@@ -15,7 +15,7 @@ import base64
 user_data_script = """#!/bin/bash
 wget https://raw.githubusercontent.com/WhiskeyDeltaX/FlowRecaster/main/streamserver/update.sh
 chmod +x update.sh
-./update.sh {uuid}
+./update.sh {uuid} {host_url}
 """
 
 # Encode the script
@@ -214,6 +214,7 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
     region = "ewr"
     public_key = generate_ssh_key()
     ssh_key_id = await get_or_create_vultr_ssh_key(public_key)
+    print("SSH key id", ssh_key_id)
     vpc = await get_or_create_vpc(region, server.workspace)
     print("VPC", vpc)
     firewall_group_id = await create_or_get_firewall_group(vpc["ip_block"])
@@ -233,8 +234,8 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                 "firewall_group_id": firewall_group_id,
                 "tags": [server.workspace],
                 "attach_vpc2": [vpc["id"]],
-                "user_data": encoded_user_data = base64.b64encode(user_data_script.format(
-                    uuid=server.uuid
+                "user_data": base64.b64encode(user_data_script.format(
+                    uuid=server.uuid, host_url=f"{PUBLIC_IP}:5000"
                 ).encode()).decode('utf-8')
             },
             headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
