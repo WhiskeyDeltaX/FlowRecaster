@@ -47,7 +47,7 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
    ```
 
    Install Nginx and MongoDB if you don't have it
-   ```
+   ```bash
     # Update your package listings
     sudo apt update
     
@@ -65,7 +65,7 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
    ```
 
    Add an `/FlowRecaster/.env` file with your local variables
-   ```
+   ```bash
     VULTR_API_KEY=Z123123123123123123123123123
     PUBLIC_IP=127.0.0.1
     SSH_KEY_PATH=./server@flowrecaster.com.pem
@@ -73,7 +73,7 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
    ```
    
    Add the following to your Nginx configuration `/etc/nginx/sites-enabled/flowrecaster.com`:
-   ```
+   ```bash
    server {
        listen 80;
        server_name flowrecaster.com www.flowrecaster.com;
@@ -95,7 +95,7 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
    ```
 
    Run certbot
-   ```
+   ```bash
    # Install Certbot and its Nginx plugin
    sudo apt install certbot python3-certbot-nginx
    
