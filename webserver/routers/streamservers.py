@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Body, HTTPException, Depends, status, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import Optional
 import httpx
 from models import StreamServer, ServerStatus
 from security import get_current_user
@@ -225,7 +227,7 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
     server.uuid = str(uuid4())
 
     if not server.hostname:
-        server.hostname = str(uuid4())[:9]
+        server.hostname = str(uuid4())[:8]
 
     if not server.stream_key:
         server.stream_key = server.uuid
@@ -258,7 +260,7 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                     record_name=f"{server.hostname}", fqdn=server.fqdn,
                     zone_id=CF_ZONE_ID, api_token=CF_API_TOKEN,
                     server_ip=PUBLIC_IP, stream_key=server.stream_key,
-                    youtube_key=youtube_key or "None"
+                    youtube_key=server.youtube_key or "None"
                 ).encode()).decode('utf-8')
             },
             headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
@@ -288,21 +290,87 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
         server.service_uuid = server_data['instance']['id']
         server.internal_ip = server_data['instance']['internal_ip']
 
+        server.is_streaming = False
+
         await stream_servers_table.insert_one(server.dict())
-        return ser(server)
+        return ser(server.dict())
+
+class UpdateStreamServer(BaseModel):
+    label: Optional[str] = None
+    stream_key: Optional[str] = None
+    youtube_key: Optional[str] = None
+    noise_reduction: Optional[str] = None
+
+@router.put("/streamservers/{server_id}")
+async def update_streamserver(server_id: str, update_data: UpdateStreamServer, user: dict = Depends(get_current_user)):
+    server = await stream_servers_table.find_one({"uuid": str(server_id)})
+    user_data = await users_table.find_one({"email": user}, {"_id": 0, "password": 0})
+
+    if not server or (user_data["role"] != "admin" and server.workspace not in user_data["workspaces"]):
+        raise HTTPException(status_code=404, detail="Server not found or access denied")
+
+    update_data = update_data.dict(exclude_unset=True)
+
+    if update_data:
+        await stream_servers_table.update_one(
+            {"uuid": str(server_id)},
+            {"$set": update_data}
+        )
+
+        server["label"] = update_data["label"]
+        server["stream_key"] = update_data["stream_key"]
+        server["youtube_key"] = update_data["youtube_key"]
+        server["noise_reduction"] = update_data["noise_reduction"]
+
+    return ser(server)
+
+async def delete_dns_record(client, hostname):
+    # Retrieve the DNS record ID
+    dns_records_response = await client.get(
+        f"https://api.cloudflare.com/client/v4/zones/{CF_ZONE_ID}/dns_records",
+        headers={"Authorization": f"Bearer {CF_API_TOKEN}"},
+        params={"type": "A", "name": hostname}
+    )
+    dns_records_response.raise_for_status()
+    dns_records = dns_records_response.json()
+
+    if dns_records["result"]:
+        dns_record_id = dns_records["result"][0]["id"]
+        # Delete the DNS record
+        delete_response = await client.delete(
+            f"https://api.cloudflare.com/client/v4/zones/{CF_ZONE_ID}/dns_records/{dns_record_id}",
+            headers={"Authorization": f"Bearer {CF_API_TOKEN}"}
+        )
+        delete_response.raise_for_status()
+        return True
+    else:
+        return False
 
 @router.delete("/streamservers/{server_id}")
 async def delete_streamserver(server_id: str, user: dict = Depends(get_current_user)):
     server = await stream_servers_table.find_one({"uuid": str(server_id)})
-    if not server or server['workspace'] not in user['workspaces']:
+    user_data = await users_table.find_one({"email": user}, {"_id": 0, "password": 0})
+
+    if not server or (user_data["role"] != "admin" and server.workspace not in user_data["workspaces"]):
         raise HTTPException(status_code=404, detail="Server not found or access denied")
 
     async with httpx.AsyncClient() as client:
-        response = await client.delete(
-            f"https://api.vultr.com/v2/instances/{server['service_uuid']}",
-            headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
-        )
-        response.raise_for_status()
+        if 'hostname' in server and server['hostname']:
+            print("Deleting", server["hostname"])
+    
+        try:
+            await delete_dns_record(client, server['hostname'])
+        except Exception as e:
+            print("DNS failed to delete", e)
+
+        try:
+            response = await client.delete(
+                f"https://api.vultr.com/v2/instances/{server['service_uuid']}",
+                headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
+            )
+        except:
+            print("Vultr failed to delete", e)
+
         await stream_servers_table.delete_one({"uuid": str(server_id)})
         return {"message": "Server deleted"}
 
@@ -358,6 +426,7 @@ async def server_online(request: Request):
 
 @router.post("/streamservers/report_status")
 async def report_status(status: ServerStatus):
+    print("Checking", status.server_uuid)
     # Check if the server_uuid exists in the stream_servers_table
     server = await stream_servers_table.find_one({"uuid": status.server_uuid})
     if not server or not server["online"]:

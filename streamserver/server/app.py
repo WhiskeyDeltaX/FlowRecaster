@@ -12,6 +12,8 @@ from datetime import datetime
 import subprocess
 import json
 import yt_dlp  # This is the module for downloading videos
+import aiohttp
+from datetime import datetime, timedelta
 
 load_dotenv()  # Load environment variables
 
@@ -72,7 +74,7 @@ def load_config():
             if not "server_host" in j:
                 j["server_host"] = server_host
 
-            if not "youtube_key" in j and youtube_key:
+            if not "youtube_key" in j:
                 j["youtube_key"] = youtube_key
 
             if not "stream_key" in j:
@@ -88,7 +90,7 @@ def load_config():
             "server_uuid": server_uuid,
             "server_host": server_host,
             "stream_key": stream_key,
-            "youtube_key": stream_key
+            "youtube_key": youtube_key
         }
 
 def save_config(config):
@@ -140,7 +142,8 @@ async def check_stream():
             current_url = config[f'{current_source}_url']
 
             if current_source != 'mp4':
-                stream_live = await is_stream_live(current_url)
+                stream1_live = await is_hls_stream_live(convert_url_rtmp_to_hls(current_url))
+
                 if not stream_live:
                     print(f"{current_source} failure detected.")
                     failure_count += 1
@@ -184,6 +187,69 @@ async def report_failure():
     async with httpx.AsyncClient() as client:
         await client.post(f'{config["server_host"]}/api/v1/report_failure', json={"stream_url": os.getenv("STREAM1_URL"), "failure_count": failure_count})
 
+def is_file_recent(filepath, max_age_seconds):
+    """Check if the file was modified within the last `max_age_seconds` seconds."""
+    if not os.path.exists(filepath):
+        return False
+    file_mod_time = os.path.getmtime(filepath)
+    current_time = time.time()
+    return (current_time - file_mod_time) < max_age_seconds
+
+async def is_hls_stream_live(url, max_age_seconds=10):
+    print("Checking URL:", url)
+    if not url:
+        return False
+    
+    """Check if the HLS stream is live by making a HEAD request to the playlist URL."""
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.head(url) as response:
+                if response.status == 200:
+                    last_modified = response.headers.get('Last-Modified')
+                    print("200", last_modified)
+                    if last_modified:
+                        last_modified_time = datetime.strptime(last_modified, '%a, %d %b %Y %H:%M:%S %Z')
+                        current_time = datetime.utcnow()
+                        print("last Mod", last_modified_time, "cur", current_time)
+                        return (current_time - last_modified_time) < timedelta(seconds=max_age_seconds)
+        except Exception as e:
+            print("Failed with", e)
+            return False
+    return False
+
+def convert_url_rtmp_to_hls(rtmp_url):
+    """
+    Convert an RTMP URL to an HLS URL.
+    
+    Parameters:
+        rtmp_url (str): The RTMP URL to convert.
+    
+    Returns:
+        str: The corresponding HLS URL.
+    """
+    if not rtmp_url or not rtmp_url.startswith('rtmp://'):
+        return ""
+
+    # Extract parts of the RTMP URL
+    parts = rtmp_url.split('/')
+    if len(parts) < 5:
+        return ""
+
+    host = parts[2]  # Extract the host
+    stream_id = parts[-1]  # Extract the stream ID
+
+    host = host.split(":")[0]
+
+    if host == "localhost":
+        protocol = 'http://'
+        host = "127.0.0.1"
+    else:
+        protocol = 'https://'
+
+    # Construct the HLS URL
+    hls_url = f"{protocol}{host}/streams/hls/{stream_id}.m3u8"
+    return hls_url
+
 async def report_system_status():
     global config
 
@@ -201,8 +267,9 @@ async def report_system_status():
         # Check FFmpeg stream status
         ffmpeg_alive = not (ffmpeg_process and ffmpeg_process.poll() is not None)
 
-        stream1_live = await is_stream_live(config['stream1_url'])
-        stream2_live = await is_stream_live(config['stream2_url'])
+        print("Checking URLs")
+        stream1_live = await is_hls_stream_live(convert_url_rtmp_to_hls(config['stream1_url']))
+        stream2_live = await is_hls_stream_live(convert_url_rtmp_to_hls(config['stream2_url']))
         
         # Prepare the payload
         payload = {

@@ -31,12 +31,15 @@ class StreamServer(BaseModel):
     ip_block: str = None
     internal_ip: str = None
     os: str = None
+    fqdn: str = None
     online: bool = False
     last_heartbeat: datetime = None
     last_boot: datetime = None
     first_heartbeat: datetime = None
     stream_key: str = None
     youtube_key: str = None
+    noise_reduction: str = None
+    is_streaming: bool = False
 
 class ServerStatus(BaseModel):
     server_uuid: str

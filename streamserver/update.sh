@@ -86,8 +86,8 @@ sed -i "s/\$PUBLIC_IP/$SERVER_IP/g" nginx.conf
 sed -i "s/\$FQDN_NAME/$FQDN_NAME/g" nginx.conf
 
 cp nginx.conf /etc/nginx/nginx.conf
-mkdir -p /var/www/html/stream
-chown www-data:www-data -R /var/www/html/stream
+mkdir -p /var/www/html/streams
+chown www-data:www-data -R /var/www/html/streams
 
 echo "---nginx reload---"
 sudo nginx -s reload

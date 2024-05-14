@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { Container, Row, Col, ListGroup, Button, Modal, Form,
-    Spinner, Badge, Table } from 'react-bootstrap';
+    Spinner, Badge, Table, ButtonGroup } from 'react-bootstrap';
 import API from '../api/axios';
 import { useUser } from '../contexts/UserContext';
 import VideoJS from './VideoJS'
 import videojs from 'video.js';
+import StreamEditModal from './StreamEditModal';
 
 function WorkspaceView() {
     const { uuid } = useParams();
@@ -13,8 +14,11 @@ function WorkspaceView() {
     const [streamServers, setStreamServers] = useState([]);
     const [selectedServer, setSelectedServer] = useState(null);
     const [showModal, setShowModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
     const [newServerName, setNewServerName] = useState('');
     const [newServerHostname, setNewServerHostname] = useState('');
+    const [newStreamKey, setNewStreamKey] = useState('');
+    const [newYoutubeKey, setNewYoutubeKey] = useState('');
     const [loading, setLoading] = useState(false);
     const ws = useRef(null);
     const { user, setUser } = useUser();
@@ -22,6 +26,7 @@ function WorkspaceView() {
     const [retryCount, setRetryCount] = useState(0);
     const maxRetries = 5;
     const playerRef = React.useRef(null);
+    const [initialEditData, setInitialEditData] = useState({});
 
     useEffect(() => {
         fetchWorkspace();
@@ -129,7 +134,12 @@ function WorkspaceView() {
     const handleCreateServer = async () => {
         setLoading(true);
         try {
-            const response = await API.post(`/streamservers/`, { label: newServerName, hostname: newServerHostname, workspace: uuid });
+            const response = await API.post(`/streamservers/`, {
+                label: newServerName,
+                hostname: newServerHostname,
+                youtube_key: newYoutubeKey,
+                stream_key: newStreamKey,
+                workspace: uuid });
             setStreamServers([...streamServers, response.data]);
             console.log("Response", response)
             setShowModal(false);
@@ -137,6 +147,28 @@ function WorkspaceView() {
             setNewServerHostname('');
         } catch (error) {
             console.error('Error creating new stream server:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleEditServer = async (uuid, data) => {
+        setLoading(true);
+
+        try {
+            const s = streamServers.find(s => s.uuid === uuid);
+
+            if (s) {
+                const response = await API.put(`/streamservers/${uuid}`, data);
+                Object.assign(s, response.data);
+
+                setStreamServers([...streamServers]);
+
+                console.log("Response", response)
+                setShowEditModal(false);
+            }
+        } catch (error) {
+            console.error('Error editing stream server:', error);
         } finally {
             setLoading(false);
         }
@@ -159,8 +191,8 @@ function WorkspaceView() {
         console.log("Trying to find best src type", selectedServer);
 
         const { src, type } = decideBestSource(
-            `http://${selectedServer.ip}:19751/hls/${selectedServer.uuid}.m3u8`,
-            `http://${selectedServer.ip}:19751/dash/${selectedServer.uuid}.mpd`
+            `https://${selectedServer.fqdn}/streams/hls/${selectedServer.stream_key}.m3u8`,
+            `https://${selectedServer.fqdn}/streams/dash/${selectedServer.stream_key}.mpd`
         );
 
         console.log("Found best", src, type);
@@ -172,6 +204,7 @@ function WorkspaceView() {
     const videoJsOptions = {
         autoplay: true,
         controls: true,
+        liveui: true,
         responsive: true,
         fluid: true,
         sources: [{
@@ -192,7 +225,47 @@ function WorkspaceView() {
           videojs.log('player will dispose');
         });
     };
+
+    const handleStartStream = () => {
+
+    }
+
+    const handleStopStream = () => {
+
+    }
+
+    const handleDeleteClick = async (data) => {
+        setLoading(true);
+
+        console.log("Handle delete data", data);
+
+        try {
+            const response = await API.delete(`/streamservers/${data.uuid}`, {
+                server_id: data.uuid
+            });
+            setStreamServers(
+                streamServers.filter(s => s.uuid !== data.uuid)
+            );
+            
+            if (selectedServer.uuid === data.uuid) {
+                setSelectedServer(null);
+            }
+            
+            console.log("Response", response)
+            setShowEditModal(false);
+        } catch (error) {
+            console.error('Error creating new stream server:', error);
+        } finally {
+            setLoading(false);
+        }
+    }
     
+    const openEditModal = (data) => {
+        console.log("Initial Data", data);
+        setInitialEditData({...data});
+        setShowEditModal(true);
+    };
+
     console.log("We good?", selectedServer && selectedServer.ip && videoSrc && videoType)
 
     if (!workspace || !streamServers) {
@@ -235,25 +308,31 @@ function WorkspaceView() {
                 <Col md={8}>
                     {selectedServer && (
                         <>
-                            <div>
+                            <div className="d-flex justify-content-between align-items-center mb-3">
                                 <h3>{selectedServer.label}</h3>
+                                <ButtonGroup>
+                                    <Button variant="success" onClick={handleStartStream}>Start Stream</Button>
+                                    <Button variant="danger" onClick={handleStopStream}>Stop Stream</Button>
+                                    <Button variant="secondary" onClick={() => setSelectedServer(null)}>Close</Button>
+                                    <Button variant="primary" onClick={() => openEditModal(selectedServer)}>Edit</Button>
+                                </ButtonGroup>
                             </div>
-                            {selectedServer.ip && <VideoJS key={videoSrc} options={videoJsOptions} onReady={handlePlayerReady} />}
+                            {selectedServer.stream1 && <VideoJS key={videoSrc} options={videoJsOptions} onReady={handlePlayerReady} />}
                             <div>
                                 <h4 className="mt-3">Computed Information</h4>
                                 <Table striped bordered hover size="sm" className="mt-3">
                                     <tbody>
                                         <tr>
                                             <td>Stream URL</td>
-                                            <td>rtmp://{selectedServer.ip}:8453/live/{selectedServer.uuid}</td>
+                                            <td>rtmp://{selectedServer.fqdn}:8453/live/{selectedServer.stream_key}</td>
                                         </tr>
                                         <tr>
                                             <td>Stream HLS</td>
-                                            <td>http://{selectedServer.ip}:19751/hls/{selectedServer.uuid}.m3u8</td>
+                                            <td>https://{selectedServer.fqdn}/streams/hls/{selectedServer.stream_key}.m3u8</td>
                                         </tr>
                                         <tr>
                                             <td>Stream DASH</td>
-                                            <td>http://{selectedServer.ip}:19751/dash/{selectedServer.uuid}.mpd</td>
+                                            <td>https://{selectedServer.fqdn}/streams/dash/{selectedServer.stream_key}.mpd</td>
                                         </tr>
                                     </tbody>
                                 </Table>
@@ -372,6 +451,15 @@ function WorkspaceView() {
                 </Col>
             </Row>
 
+            <StreamEditModal
+                showModal={showEditModal}
+                setShowModal={setShowEditModal}
+                handleSave={handleEditServer}
+                initialData={initialEditData}
+                loading={loading}
+                handleDeleteClick={handleDeleteClick}
+            />
+
             {/* Create Stream Server Modal */}
             <Modal show={showModal} onHide={() => setShowModal(false)}>
                 <Modal.Header closeButton>
@@ -393,6 +481,22 @@ function WorkspaceView() {
                                 type="text"
                                 value={newServerHostname}
                                 onChange={(e) => setNewServerHostname(e.target.value)}
+                            />
+                        </Form.Group>
+                        <Form.Group>
+                            <Form.Label>Stream Key</Form.Label>
+                            <Form.Control
+                                type="text"
+                                value={newStreamKey}
+                                onChange={(e) => setNewStreamKey(e.target.value)}
+                            />
+                        </Form.Group>
+                        <Form.Group>
+                            <Form.Label>YouTube Key</Form.Label>
+                            <Form.Control
+                                type="text"
+                                value={newYoutubeKey}
+                                onChange={(e) => setNewYoutubeKey(e.target.value)}
                             />
                         </Form.Group>
                     </Form>
