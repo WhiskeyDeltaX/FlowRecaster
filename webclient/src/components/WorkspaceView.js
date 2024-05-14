@@ -38,7 +38,7 @@ function WorkspaceView() {
 
     const connectWebSocket = () => {
         const token = user.access_token;
-        ws.current = new WebSocket(`ws://${process.env.REACT_APP_API_IP}/ws/updates/${uuid}?token=${token}`);
+        ws.current = new WebSocket(`${process.env.REACT_APP_API_SOCKET}/ws/updates/${uuid}?token=${token}`);
 
         ws.current.onopen = () => {
             console.log('WebSocket Connected');

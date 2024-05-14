@@ -18,7 +18,7 @@ from utils import ser
 user_data_script = """#!/bin/bash
 wget https://raw.githubusercontent.com/WhiskeyDeltaX/FlowRecaster/main/streamserver/update.sh
 chmod +x update.sh
-./update.sh {uuid} {host_url}
+./update.sh {uuid} {host_url} {record_name} {zone_id} {api_token} {server_ip}
 """
 
 router = APIRouter()
@@ -28,6 +28,12 @@ SERVER_HOST_URL = os.getenv('HOST_URL', "https://flowrecaster") # This is for th
 SSH_KEY_PATH = os.getenv('SSH_KEY_PATH', './server@flowrecaster.com.pem')
 VULTR_V4_SUBNET = os.getenv('VULTR_V4_SUBNET', "10.69.2.0")
 PUBLIC_IP = os.getenv('PUBLIC_IP', "127.0.0.1")
+
+# Cloudflare token
+# https://dash.cloudflare.com/profile/api-tokens
+CF_DOMAIN_NAME = os.getenv('CF_DOMAIN_NAME', "streams.flowrecaster.com")
+CF_API_TOKEN = os.getenv('CF_API_TOKEN', "asdfasdfasdfasdf")
+CF_ZONE_ID = os.getenv('CF_ZONE_ID', "asdfasdfasdfasdf")
 
 def generate_ssh_key():
     """Generate an RSA key pair and save it locally if not exists."""
@@ -139,10 +145,11 @@ async def ensure_firewall_rules(client, firewall_group_id, ip_block, subnet_size
     
     # Define rules to ensure based on IP and ports
     rules_to_ensure = [
-        (80, 'tcp', PUBLIC_IP, '32'),   # HTTP port for PUBLIC_IP
         (22, 'tcp', PUBLIC_IP, '32'),   # SSH port for PUBLIC_IP
         (8453, 'tcp', ip_block, subnet_size),  # RTMP specific port, for given ip_block
-        (19751, 'tcp', ip_block, subnet_size)  # RTMP specific port, for given ip_block
+        (80, 'tcp', ip_block, subnet_size),
+        (443, 'tcp', ip_block, subnet_size),
+        # (19751, 'tcp', ip_block, subnet_size)  # RTMP specific port, for given ip_block
     ]
 
     # Check and add missing rules
@@ -216,7 +223,11 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
         raise HTTPException(status_code=401, detail="Access to the workspace is denied")
 
     server.uuid = str(uuid4())
-    server.hostname = ""
+
+    if not server.hostname:
+        server.hostname = str(uuid4())[:9]
+
+    server.hostname = f"{server.hostname}.{CF_DOMAIN_NAME}"
 
     region = "ewr"
     public_key = generate_ssh_key()
@@ -239,7 +250,10 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                 "firewall_group_id": firewall_group_id,
                 "tags": [server.workspace],
                 "user_data": base64.b64encode(user_data_script.format(
-                    uuid=server.uuid, host_url=SERVER_HOST_URL
+                    uuid=server.uuid, host_url=SERVER_HOST_URL,
+                    record_name=f"{server.hostname}.{CF_DOMAIN_NAME}",
+                    zone_id=CF_ZONE_ID, api_token=CF_API_TOKEN,
+                    server_ip=PUBLIC_IP
                 ).encode()).decode('utf-8')
             },
             headers={"Authorization": f"Bearer {VULTR_API_KEY}"}

@@ -33,7 +33,7 @@ app.add_middleware(
 app.include_router(streamservers.router, prefix="/api/v1", tags=["streamservers"])
 app.include_router(workspaces.router, prefix="/api/v1", tags=["workspaces"])
 app.include_router(users.router, prefix="/api/v1", tags=["users"])
-app.include_router(sockets.router, tags=["sockets"])
+app.include_router(sockets.router,  prefix="/api/v1", tags=["sockets"])
 
 if __name__ == "__main__":
     import uvicorn

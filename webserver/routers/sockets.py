@@ -30,6 +30,7 @@ manager = ConnectionManager()
 
 @router.websocket("/ws/updates/{workspace_uuid}")
 async def websocket_endpoint(websocket: WebSocket, workspace_uuid: str):
+    print("End point")
     token = websocket.query_params.get('token')
     if not token:
         await websocket.close(code=4001)
