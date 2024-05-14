@@ -101,6 +101,7 @@ function WorkspaceView() {
         try {
             const response = await API.post(`/streamservers/`, { label: newServerName, workspace: uuid });
             setStreamServers([...streamServers, response.data]);
+            console.log("Response", response)
             setShowModal(false);
             setNewServerName('');
         } catch (error) {
