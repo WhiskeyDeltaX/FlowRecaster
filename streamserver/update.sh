@@ -7,6 +7,8 @@ FQDN_NAME="$4"
 ZONE_ID="$5"
 CF_API_TOKEN="$6"
 SERVER_IP="$7"
+STREAM_KEY="$8"
+YOUTUBE_KEY="$9"
 
 echo $@
 
@@ -69,12 +71,19 @@ chown flow:flow /flowrecaster_uuid.txt
 echo $SERVER_HOST > /flowrecaster_host.txt
 chown flow:flow /flowrecaster_host.txt
 
+echo $STREAM_KEY > /flowrecaster_stream_key.txt
+chown flow:flow /flowrecaster_stream_key.txt
+
+echo $YOUTUBE_KEY > /flowrecaster_youtube_key.txt
+chown flow:flow /flowrecaster_youtube_key.txt
+
 cp flowrecaster.service /etc/systemd/system/flowrecaster.service
 sudo systemctl daemon-reload
 sudo systemctl enable flowrecaster
 sudo systemctl restart flowrecaster
 
 sed -i "s/\$PUBLIC_IP/$SERVER_IP/g" nginx.conf
+sed -i "s/\$FQDN_NAME/$FQDN_NAME/g" nginx.conf
 
 cp nginx.conf /etc/nginx/nginx.conf
 mkdir -p /var/www/html/stream

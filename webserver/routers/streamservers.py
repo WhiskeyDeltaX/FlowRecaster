@@ -18,20 +18,20 @@ from utils import ser
 user_data_script = """#!/bin/bash
 wget https://raw.githubusercontent.com/WhiskeyDeltaX/FlowRecaster/main/streamserver/update.sh
 chmod +x update.sh
-./update.sh {uuid} {host_url} {record_name} {fqdn} {zone_id} {api_token} {server_ip} > /stream_report.txt
+./update.sh {uuid} {host_url} {record_name} {fqdn} {zone_id} {api_token} {server_ip} {stream_key} {youtube_key} > /stream_report.txt
 """
 
 router = APIRouter()
 
 VULTR_API_KEY = os.getenv('VULTR_API_KEY', "Z123123123123123123123123123")
-SERVER_HOST_URL = os.getenv('HOST_URL', "https://flowrecaster") # This is for the RTMP clients to broadcast back to us
+SERVER_HOST_URL = os.getenv('SERVER_HOST_URL', "https://flowrecaster") # This is for the RTMP clients to broadcast back to us
 SSH_KEY_PATH = os.getenv('SSH_KEY_PATH', './server@flowrecaster.com.pem')
 VULTR_V4_SUBNET = os.getenv('VULTR_V4_SUBNET', "10.69.2.0")
 PUBLIC_IP = os.getenv('PUBLIC_IP', "127.0.0.1")
 
 # Cloudflare token
 # https://dash.cloudflare.com/profile/api-tokens
-CF_DOMAIN_NAME = os.getenv('CF_DOMAIN_NAME', "streams.flowrecaster.com")
+CF_DOMAIN_NAME = os.getenv('CF_DOMAIN_NAME', "flowrecaster.com")
 CF_API_TOKEN = os.getenv('CF_API_TOKEN', "asdfasdfasdfasdf")
 CF_ZONE_ID = os.getenv('CF_ZONE_ID', "asdfasdfasdfasdf")
 
@@ -227,6 +227,9 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
     if not server.hostname:
         server.hostname = str(uuid4())[:9]
 
+    if not server.stream_key:
+        server.stream_key = server.uuid
+
     server.hostname = f"{server.hostname}.streams"
     server.fqdn = f"{server.hostname}.{CF_DOMAIN_NAME}"
 
@@ -254,7 +257,8 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                     uuid=server.uuid, host_url=SERVER_HOST_URL,
                     record_name=f"{server.hostname}", fqdn=server.fqdn,
                     zone_id=CF_ZONE_ID, api_token=CF_API_TOKEN,
-                    server_ip=PUBLIC_IP
+                    server_ip=PUBLIC_IP, stream_key=server.stream_key,
+                    youtube_key=youtube_key or "None"
                 ).encode()).decode('utf-8')
             },
             headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
@@ -304,7 +308,6 @@ async def delete_streamserver(server_id: str, user: dict = Depends(get_current_u
 
 @router.post("/streamservers/server_online")
 async def server_online(request: Request):
-    
     data = await request.json()
     server_uuid = data.get("server_uuid")
     
@@ -317,6 +320,8 @@ async def server_online(request: Request):
     server = await stream_servers_table.find_one({"uuid": server_uuid})
     if not server:
         raise HTTPException(status_code=404, detail="Server not found.")
+
+    print("HOST IP?", request.client.host)
 
     # Update server data
     update_data = {

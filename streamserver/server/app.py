@@ -47,6 +47,21 @@ def load_config():
     else:
         server_host = "http://localhost"
 
+    if os.path.isfile("/flowrecaster_stream_key.txt"):
+        with open("/flowrecaster_stream_key.txt", 'r') as file:
+            stream_key = file.read().strip()
+    else:
+        stream_key = server_uuid
+
+    if os.path.isfile("/flowrecaster_youtube_key.txt"):
+        with open("/flowrecaster_youtube_key.txt", 'r') as file:
+            youtube_key = file.read().strip()
+
+            if youtube_key == "None":
+                youtube_key = ""
+    else:
+        youtube_key = ""
+
     try:
         with open(config_file, 'r') as file:
             j = json.load(file)
@@ -57,19 +72,23 @@ def load_config():
             if not "server_host" in j:
                 j["server_host"] = server_host
 
-            if not "youtube_key" in j:
-                j["youtube_key"] = ""
+            if not "youtube_key" in j and youtube_key:
+                j["youtube_key"] = youtube_key
+
+            if not "stream_key" in j:
+                j["stream_key"] = stream_key
 
             return j
     except:
         return {
-            "stream1_url": f"rtmp://localhost:8453/live/{server_uuid}",
+            "stream1_url": f"rtmp://localhost:8453/live/{stream_key}",
             "stream2_url": os.getenv("STREAM2_URL"),
             "mp4_url": os.getenv("MP4_URL", "video.mp4"),
             "active_source": "stream1",
             "server_uuid": server_uuid,
             "server_host": server_host,
-            "youtube_key": ""
+            "stream_key": stream_key,
+            "youtube_key": stream_key
         }
 
 def save_config(config):
@@ -373,7 +392,7 @@ async def get_version():
 @app.post("/validate_publish/")
 async def validate_stream(name: str = Form(...)):
     # Implement your authentication logic here
-    if name == config["server_uuid"]:
+    if name == config["stream_key"]:
         return {"success": True}
     else:
         return {"success": True}
