@@ -1,6 +1,14 @@
 from pydantic import BaseModel, Field
+from typing import List
 from uuid import UUID, uuid4
 from datetime import datetime
+
+class Workspace(BaseModel):
+    name: str
+    date_created: datetime = None
+    date_modified: datetime = None
+    region: str = "ewr"
+    uuid: str = None
 
 class StreamServer(BaseModel):
     date_created: datetime = Field(default_factory=datetime.utcnow)
@@ -24,7 +32,6 @@ class StreamServer(BaseModel):
     internal_ip: str = None
     os: str = None
     online: bool = False
-
     last_heartbeat: datetime = None
     last_boot: datetime = None
     first_heartbeat: datetime = None
@@ -38,7 +45,32 @@ class ServerStatus(BaseModel):
     bytes_sent: int
     bytes_recv: int
     selected_source: str
-    youtube_stream_key: str
+    youtube_key: str
     ffmpeg_active: bool = False
     stream1_live: bool = False
     stream2_live: bool = False
+    noise_reduction: str = None
+    stream1_url: str = None
+    stream2_url: str = None
+
+from pydantic import BaseModel, Field, EmailStr
+from typing import List, Dict
+from datetime import datetime 
+
+class User(BaseModel):
+    email: str
+    password: str  # In production, ensure this is hashed before storing
+    # role: str = Field(..., pattern="^(viewer|manager|admin)$")
+    workspaces: List[str] = None
+    created_at: datetime = None
+    updated_at: datetime = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "email": "test@example.com",
+                "password": "s3cr3t",  # Reminder: Hash this password in real scenarios
+                "role": "manager",
+                "workspaces": ["123", "456"]
+            }
+        }

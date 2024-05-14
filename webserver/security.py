@@ -18,14 +18,11 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 async def get_current_user(token: str = Security(oauth2_scheme)):
-    if token:
-        return {
-            "workspaces": "d6516e3e-9600-4826-9121-5c18e2829a46"
-        }
-
+    print("TOKEN", token)
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
+        print("username", username)
         if username is None:
             raise credentials_exception
         return username
@@ -36,6 +33,21 @@ async def get_current_user(token: str = Security(oauth2_scheme)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+async def get_user_from_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user_id  # Or fetch the user from the database
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Could not validate credentials"
         )
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

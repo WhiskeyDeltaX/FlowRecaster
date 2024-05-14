@@ -6,3 +6,5 @@ client = AsyncIOMotorClient(os.getenv('MONGO_URL', "mongodb://localhost:27017/")
 db = client.flowrecaster
 stream_servers_table = db['stream_servers']
 stream_servers_status_table = db['stream_servers_status']
+workspaces_table = db['workspaces']
+users_table = db['users']

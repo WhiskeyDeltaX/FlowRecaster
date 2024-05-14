@@ -36,6 +36,8 @@ sudo systemctl enable flowrecaster
 sudo systemctl restart flowrecaster
 
 cp nginx.conf /etc/nginx/nginx.conf
+cp hls.nginx /etc/nginx/sites-enabled/hls.nginx
+mkdir -p /var/www/html/stream
 
 echo "---nginx reload---"
 sudo nginx -s reload
@@ -44,5 +46,6 @@ popd
 
 ufw allow 8453
 ufw allow 80
+ufw allow 19751
 
 echo "---Finished---"

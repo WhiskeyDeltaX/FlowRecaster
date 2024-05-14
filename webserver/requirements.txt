@@ -11,3 +11,4 @@ httpx
 motor
 cryptography
 rsa
+bcrypt==4.0.1

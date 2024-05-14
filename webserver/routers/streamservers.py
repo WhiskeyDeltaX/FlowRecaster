@@ -9,8 +9,10 @@ import os
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
-from database import stream_servers_table
+from database import stream_servers_table, users_table
 import base64
+from routers.sockets import manager
+from utils import ser
 
 # Define the user data script
 user_data_script = """#!/bin/bash
@@ -137,15 +139,16 @@ async def ensure_firewall_rules(client, firewall_group_id, ip_block, subnet_size
     
     # Define rules to ensure based on IP and ports
     rules_to_ensure = [
-        (80, 'tcp', public_ip, '32'),   # HTTP port for PUBLIC_IP
-        (22, 'tcp', public_ip, '32'),   # SSH port for PUBLIC_IP
-        (8453, 'tcp', ip_block, subnet_size)  # RTMP specific port, for given ip_block
+        (80, 'tcp', PUBLIC_IP, '32'),   # HTTP port for PUBLIC_IP
+        (22, 'tcp', PUBLIC_IP, '32'),   # SSH port for PUBLIC_IP
+        (8453, 'tcp', ip_block, subnet_size),  # RTMP specific port, for given ip_block
+        (19751, 'tcp', ip_block, subnet_size)  # RTMP specific port, for given ip_block
     ]
 
     # Check and add missing rules
     for port, protocol, ip, subnet in rules_to_ensure:
         rule_exists = any(rule['ip_type'] == 'v4' and rule['subnet'] == ip and rule['subnet_size'] == subnet and
-                          rule['port'] == str(port) and rule['protocol'] == protocol for rule in existing_rules)
+                          rule['port'] == str(port) and rule['protocol'] == protocol for rule in rules)
         
         if not rule_exists:
             await add_firewall_rule(client, firewall_group_id, ip, subnet, protocol, port, headers)
@@ -196,15 +199,20 @@ async def get_or_create_vpc(region: str, description: str):
         return vpc_data['vpc']
 
 @router.get("/streamservers/{workspace_id}")
-async def get_streamservers(workspace_id: UUID, user: dict = Depends(get_current_user)):
-    if str(workspace_id) not in user['workspaces']:
+async def get_streamservers(workspace_id: str, user: dict = Depends(get_current_user)):
+    user_data = await users_table.find_one({"email": user}, {"_id": 0, "password": 0})
+    
+    if user_data and (user_data["role"] != "admin" and workspace_id not in user_data["workspaces"]):
         raise HTTPException(status_code=401, detail="Access to the workspace is denied")
+
     streamservers = await stream_servers_table.find({"workspace": str(workspace_id)}).to_list(None)
-    return streamservers
+    return ser(streamservers)
 
 @router.post("/streamservers/", status_code=status.HTTP_201_CREATED)
 async def create_streamserver(server: StreamServer, user: dict = Depends(get_current_user)):
-    if server.workspace not in user['workspaces']:
+    user_data = await users_table.find_one({"email": user}, {"_id": 0, "password": 0})
+    
+    if user_data and (user_data["role"] != "admin" and server.workspace not in user_data["workspaces"]):
         raise HTTPException(status_code=401, detail="Access to the workspace is denied")
 
     server.uuid = str(uuid4())
@@ -262,7 +270,7 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
         server.internal_ip = server_data['instance']['internal_ip']
 
         await stream_servers_table.insert_one(server.dict())
-        return {"message": "Server created", "server": server}
+        return ser(server)
 
 @router.delete("/streamservers/{server_id}")
 async def delete_streamserver(server_id: str, user: dict = Depends(get_current_user)):
@@ -281,6 +289,7 @@ async def delete_streamserver(server_id: str, user: dict = Depends(get_current_u
 
 @router.post("/streamservers/server_online")
 async def server_online(request: Request):
+    
     data = await request.json()
     server_uuid = data.get("server_uuid")
     
@@ -312,6 +321,7 @@ async def server_online(request: Request):
     print("Server Online", server)
 
     if result.modified_count == 1:
+        await manager.broadcast({"type": "server_online", "data": {"uuid": server_uuid, "status": "online"}}, server.workspace)
         return JSONResponse(status_code=200, content={"message": "Server status updated successfully."})
     else:
         return JSONResponse(status_code=500, content={"message": "Failed to update server status."})
@@ -331,6 +341,7 @@ async def report_status(status: ServerStatus):
     print("Logged status report", status)
 
     # # Insert the status document into the stream_servers_status_table
-    # stream_servers_status_table.insert_one(status)
+    stream_servers_status_table.insert_one(status)
+    await manager.broadcast({"type": "status_report", "data": status_dict}, server.workspace)
 
     return {"message": "Status reported successfully"}

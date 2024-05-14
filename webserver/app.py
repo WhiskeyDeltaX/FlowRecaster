@@ -1,20 +1,17 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status, WebSocket
 from dotenv import load_dotenv
 import os
 from fastapi.middleware.cors import CORSMiddleware
-
 import models
-from routers import streamservers
+import logging
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from routers import workspaces, sockets, streamservers, users
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = FastAPI()
-
-import logging
-from fastapi import FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -34,6 +31,9 @@ app.add_middleware(
 )
 
 app.include_router(streamservers.router, prefix="/api/v1", tags=["streamservers"])
+app.include_router(workspaces.router, prefix="/api/v1", tags=["workspaces"])
+app.include_router(users.router, prefix="/api/v1", tags=["users"])
+app.include_router(sockets.router, tags=["sockets"])
 
 if __name__ == "__main__":
     import uvicorn
