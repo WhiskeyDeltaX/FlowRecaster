@@ -1,8 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Container, Row, Col, ListGroup, Button, Modal, Form, Spinner } from 'react-bootstrap';
+import { Container, Row, Col, ListGroup, Button, Modal, Form,
+    Spinner, Badge, Table } from 'react-bootstrap';
 import API from '../api/axios';
 import { useUser } from '../contexts/UserContext';
+import VideoJS from './VideoJS'
+import videojs from 'video.js';
 
 function WorkspaceView() {
     const { uuid } = useParams();
@@ -17,6 +20,7 @@ function WorkspaceView() {
     const [shouldReconnect, setShouldReconnect] = useState(true);
     const [retryCount, setRetryCount] = useState(0);
     const maxRetries = 5;
+    const playerRef = React.useRef(null);
 
     useEffect(() => {
         fetchWorkspace();
@@ -44,6 +48,7 @@ function WorkspaceView() {
         ws.current.onmessage = (e) => {
             const message = JSON.parse(e.data);
             console.log('Received message:', message);
+            handleWebSocketMessage(message);
         };
 
         ws.current.onclose = () => {
@@ -65,15 +70,39 @@ function WorkspaceView() {
 
     const handleWebSocketMessage = (message) => {
         if (message.type === 'server_online' && message.data.uuid) {
-            // Update the state of the specific server to reflect it's now online
-            const updatedServers = streamServers.map(server => {
-                if (server.uuid === message.data.uuid) {
-                    return { ...server, online: true, last_heartbeat: new Date().toISOString() };
+            setStreamServers(currentStreamServers => {
+                const updateServer = currentStreamServers.find(s => s.uuid === message.data.uuid);
+
+                if (updateServer) {
+                    Object.assign(updateServer, message.data);
+
+                    if (selectedServer && selectedServer.uuid === updateServer.uuid) {
+                        setSelectedServer(updateServer);
+                    }
+                } else {
+                    currentStreamServers.push(message.data);
                 }
-                return server;
+                
+                return currentStreamServers.slice();
             });
-            setStreamServers(updatedServers);
-            console.log('Server Online:', message.data);
+        } else if (message.type === 'status_report' && message.data.uuid) {
+            setStreamServers(currentStreamServers => {
+                console.log("Current Stream Servers", currentStreamServers)
+
+                const updateServer = currentStreamServers.find(s => s.uuid === message.data.uuid);
+
+                if (updateServer) {
+                    updateServer.hasHeartbeat = true;
+                    updateServer.stream1 = message.data.status.stream1_live;
+                    updateServer.last_status_update = message.data.status;
+
+                    if (selectedServer && selectedServer.uuid === updateServer.uuid) {
+                        setSelectedServer(updateServer);
+                    }
+                }
+
+                return currentStreamServers.slice();
+            });
         }
     };
 
@@ -89,8 +118,8 @@ function WorkspaceView() {
     const fetchStreamServers = async () => {
         try {
             const response = await API.get(`/streamservers/${uuid}`);
+            console.log(response);
             setStreamServers(response.data);
-            setSelectedServer(response.data[0] || null);  // Select the first server by default
         } catch (error) {
             console.error('Failed to fetch stream servers:', error);
         }
@@ -110,6 +139,59 @@ function WorkspaceView() {
             setLoading(false);
         }
     };
+
+    function decideBestSource(hlsUrl, dashUrl) {
+        // Simple example: Prefer DASH if supported, else fallback to HLS
+        let type = 'application/dash+xml';
+        let src = dashUrl;
+        if (!MediaSource || !MediaSource.isTypeSupported(type)) {
+            type = 'application/x-mpegURL'; // Fallback to HLS
+            src = hlsUrl;
+        }
+        return { src, type };
+    }
+
+    let videoSrc, videoType;
+
+    if (selectedServer) {
+        console.log("Trying to find best src type", selectedServer);
+
+        const { src, type } = decideBestSource(
+            `http://${selectedServer.ip}:19751/hls/${selectedServer.uuid}.m3u8`,
+            `http://${selectedServer.ip}:19751/dash/${selectedServer.uuid}.mpd`
+        );
+
+        console.log("Found best", src, type);
+
+        videoSrc = src;
+        videoType = type;
+    }
+
+    const videoJsOptions = {
+        autoplay: true,
+        controls: true,
+        responsive: true,
+        fluid: true,
+        sources: [{
+          src: videoSrc,
+          type: videoType
+        }]
+    };
+    
+    const handlePlayerReady = (player) => {
+        playerRef.current = player;
+    
+        // You can handle player events here, for example:
+        player.on('waiting', () => {
+          videojs.log('player is waiting');
+        });
+    
+        player.on('dispose', () => {
+          videojs.log('player will dispose');
+        });
+    };
+    
+    console.log("We good?", selectedServer && selectedServer.ip && videoSrc && videoType)
 
     if (!workspace || !streamServers) {
         return (
@@ -134,8 +216,16 @@ function WorkspaceView() {
                 <Col md={4}>
                     <ListGroup>
                         {streamServers.map(server => (
-                            <ListGroup.Item key={server.uuid} action onClick={() => setSelectedServer(server)}>
+                            <ListGroup.Item key={server.uuid} action onClick={() => setSelectedServer(server)}  className="d-flex justify-content-between align-items-center mb-2">
                                 {server.label}
+                                <div className="d-flex" style={{gap: "5px"}}>
+                                    <Badge pill bg={server.hasHeartbeat ? "success" : "danger"}>
+                                        {server.hasHeartbeat ? "Server" : "Server"}
+                                    </Badge>
+                                    <Badge pill bg={server.stream1 ? "success" : "danger"}>
+                                        {server.stream1 ? "Stream 1" : "Stream 1"}
+                                    </Badge>
+                                </div>
                             </ListGroup.Item>
                         ))}
                     </ListGroup>
@@ -143,15 +233,137 @@ function WorkspaceView() {
                 <Col md={8}>
                     {selectedServer && (
                         <>
-                            <h3>{selectedServer.label}</h3>
-                            <video controls width="100%">
-                                <source src={`http://${selectedServer.ip}:19751/hls/stream.m3u8`} type="application/x-mpegURL" />
-                            </video>
                             <div>
-                                {/* Display server details */}
-                                <p>Region: {selectedServer.region}</p>
-                                <p>IP: {selectedServer.ip}</p>
-                                {/* Include other details as necessary */}
+                                <h3>{selectedServer.label}</h3>
+                            </div>
+                            {selectedServer.ip && <VideoJS key={videoSrc} options={videoJsOptions} onReady={handlePlayerReady} />}
+                            <div>
+                                <h4 className="mt-3">Computed Information</h4>
+                                <Table striped bordered hover size="sm" className="mt-3">
+                                    <tbody>
+                                        <tr>
+                                            <td>Stream URL</td>
+                                            <td>rtmp://{selectedServer.ip}:8453/live/{selectedServer.uuid}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Stream HLS</td>
+                                            <td>http://{selectedServer.ip}:19751/hls/{selectedServer.uuid}.m3u8</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Stream DASH</td>
+                                            <td>http://{selectedServer.ip}:19751/dash/{selectedServer.uuid}.mpd</td>
+                                        </tr>
+                                    </tbody>
+                                </Table>
+                                
+                                {selectedServer.last_status_update && (<>
+                                    <h4 className="mt-3">Last Server Status</h4>
+                                    <Table striped bordered hover size="sm" className="mt-3">
+                                        <tbody>
+                                            <tr>
+                                                <td>Date Created</td>
+                                                <td>{new Date(selectedServer.last_status_update.date_created).toLocaleString()}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>CPU Usage</td>
+                                                <td>{selectedServer.last_status_update.cpu_usage}%</td>
+                                            </tr>
+                                            <tr>
+                                                <td>RAM Usage</td>
+                                                <td>{selectedServer.last_status_update.ram_usage}%</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Bytes Sent</td>
+                                                <td>
+                                                    {selectedServer.last_status_update.bytes_sent ? (selectedServer.last_status_update.bytes_sent * 8 / 1000).toLocaleString() + ' kbps' : 'N/A'}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>Bytes Received</td>
+                                                <td>
+                                                    {selectedServer.last_status_update.bytes_recv ? (selectedServer.last_status_update.bytes_recv * 8 / 1000).toLocaleString() + ' kbps' : 'N/A'}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>Selected Source</td>
+                                                <td>{selectedServer.last_status_update.selected_source}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>YouTube Key</td>
+                                                <td>{selectedServer.last_status_update.youtube_key}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>FFmpeg Active</td>
+                                                <td>{selectedServer.last_status_update.ffmpeg_active ? "Yes" : "No"}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Stream 1 Live</td>
+                                                <td>{selectedServer.last_status_update.stream1_live ? "Yes" : "No"}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Stream 2 Live</td>
+                                                <td>{selectedServer.last_status_update.stream2_live ? "Yes" : "No"}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Noise Reduction</td>
+                                                <td>{selectedServer.last_status_update.noise_reduction || "N/A"}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Stream 1 URL</td>
+                                                <td>{selectedServer.last_status_update.stream1_url}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Stream 2 URL</td>
+                                                <td>{selectedServer.last_status_update.stream2_url}</td>
+                                            </tr>
+                                        </tbody>
+                                    </Table>
+                                </>)}
+                                <h4 className="mt-3">Server Information</h4>
+                                <Table striped bordered hover size="sm">
+                                    <tbody>
+                                        <tr>
+                                            <td>Region</td>
+                                            <td>{selectedServer.region || "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>IP</td>
+                                            <td>{selectedServer.ip || "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Operating System</td>
+                                            <td>{selectedServer.os || "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Plan</td>
+                                            <td>{selectedServer.plan || "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Cores</td>
+                                            <td>{selectedServer.cores || "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Memory</td>
+                                            <td>{selectedServer.memory ? `${selectedServer.memory} GB` : "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Cost</td>
+                                            <td>{selectedServer.cost ? `$${selectedServer.cost}` : "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Hostname</td>
+                                            <td>{selectedServer.hostname || "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Last Heartbeat</td>
+                                            <td>{selectedServer.lastHeartbeat ? new Date(selectedServer.lastHeartbeat).toLocaleString() : "N/A"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Last Boot</td>
+                                            <td>{selectedServer.lastBoot ? new Date(selectedServer.lastBoot).toLocaleString() : "N/A"}</td>
+                                        </tr>
+                                    </tbody>
+                                </Table>
                             </div>
                         </>
                     )}

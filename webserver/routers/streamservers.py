@@ -293,6 +293,8 @@ async def server_online(request: Request):
     data = await request.json()
     server_uuid = data.get("server_uuid")
     
+    print("UUID:", server_uuid, "data", data)
+
     if not server_uuid:
         raise HTTPException(status_code=400, detail="Server UUID is required.")
 
@@ -318,10 +320,18 @@ async def server_online(request: Request):
     # Update the server entry in MongoDB
     result = await stream_servers_table.update_one({"uuid": server_uuid}, update_data)
 
+    server["last_heartbeat"] = update_data["$set"]["last_heartbeat"]
+    server["last_boot"] = update_data["$set"]["last_boot"]
+    server["ip"] = update_data["$set"]["ip"]
+    server["online"] = update_data["$set"]["online"]
+
+    if "first_heartbeat" in update_data["$set"]:
+        server["first_heartbeat"] = update_data["$set"]["first_heartbeat"]
+
     print("Server Online", server)
 
     if result.modified_count == 1:
-        await manager.broadcast({"type": "server_online", "data": {"uuid": server_uuid, "status": "online"}}, server.workspace)
+        await manager.broadcast({"type": "server_online", "data": ser(server)}, server["workspace"])
         return JSONResponse(status_code=200, content={"message": "Server status updated successfully."})
     else:
         return JSONResponse(status_code=500, content={"message": "Failed to update server status."})
@@ -340,8 +350,8 @@ async def report_status(status: ServerStatus):
 
     print("Logged status report", status)
 
-    # # Insert the status document into the stream_servers_status_table
-    stream_servers_status_table.insert_one(status)
-    await manager.broadcast({"type": "status_report", "data": status_dict}, server.workspace)
+    # Insert the status document into the stream_servers_status_table
+    # stream_servers_status_table.insert_one(status)
+    await manager.broadcast({"type": "status_report", "data": {"uuid": status["server_uuid"], "status": ser(status)}}, server["workspace"])
 
     return {"message": "Status reported successfully"}

@@ -199,7 +199,7 @@ async def report_system_status():
             "stream2_live": stream2_live,
             "stream1_url": config['stream1_url'] or "",
             "stream2_url": config['stream2_url'] or "",
-            "noise_reduction": config.get("Noise Reduction", False)
+            "noise_reduction": config.get("Noise Reduction", "0")
         }
 
         print("Sending payload", payload)

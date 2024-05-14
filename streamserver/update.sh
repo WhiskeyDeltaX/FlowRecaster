@@ -6,7 +6,7 @@ server_host="$2"
 echo "---Updating---"
 sudo apt update
 echo "---Installing nginx---"
-sudo apt install -y nginx libnginx-mod-rtmp git ffmpeg
+sudo apt install -y nginx libnginx-mod-rtmp git ffmpeg htop
 
 echo "---Cloning---"
 rm -rf /flowrecaster
@@ -22,7 +22,7 @@ pip3 install -r server/requirements.txt
 echo "---Adding daemon---"
 
 sudo useradd flow
-chown flow:flow /flowrecaster/streamserver/server
+chown flow:flow -R /flowrecaster/streamserver/server
 
 echo $server_uuid > /flowrecaster_uuid.txt
 chown flow:flow /flowrecaster_uuid.txt
@@ -38,6 +38,7 @@ sudo systemctl restart flowrecaster
 cp nginx.conf /etc/nginx/nginx.conf
 cp hls.nginx /etc/nginx/sites-enabled/hls.nginx
 mkdir -p /var/www/html/stream
+chown www-data:www-data -R /var/www/html/stream
 
 echo "---nginx reload---"
 sudo nginx -s reload
