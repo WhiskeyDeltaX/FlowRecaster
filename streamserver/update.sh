@@ -90,7 +90,6 @@ mkdir -p /var/www/html/streams
 chown www-data:www-data -R /var/www/html/streams
 
 echo "---nginx reload---"
-sudo nginx -s reload
 
 popd
 
@@ -99,8 +98,34 @@ ufw allow 80
 ufw allow 443
 ufw allow 19751
 
+systemctl reload nginx
+
 sleep 120
 
-sudo certbot --email mail@$FQDN_NAME --agree-tos --non-interactive --nginx -d $FQDN_NAME
+# Define retry parameters
+MAX_RETRIES=10
+WAIT_TIME=180  # 3 minutes in seconds
+
+# Initialize counter
+count=0
+
+# Loop to retry certbot command
+while [ $count -lt $MAX_RETRIES ]; do
+    sudo certbot --email mail@$FQDN_NAME --agree-tos --non-interactive --nginx -d $FQDN_NAME
+    
+    # Check if certbot succeeded
+    if [ $? -eq 0 ]; then
+        echo "Certbot succeeded!"
+        break
+    else
+        echo "Certbot failed. Attempt $((count+1)) of $MAX_RETRIES. Retrying in $WAIT_TIME seconds..."
+        count=$((count+1))
+        sleep $WAIT_TIME
+    fi
+done
+
+sleep 10
+
+systemctl reload nginx
 
 echo "---Finished---"
