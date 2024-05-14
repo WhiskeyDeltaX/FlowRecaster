@@ -18,7 +18,7 @@ from utils import ser
 user_data_script = """#!/bin/bash
 wget https://raw.githubusercontent.com/WhiskeyDeltaX/FlowRecaster/main/streamserver/update.sh
 chmod +x update.sh
-./update.sh {uuid} {host_url} {record_name} {zone_id} {api_token} {server_ip}
+./update.sh {uuid} {host_url} {record_name} {fqdn} {zone_id} {api_token} {server_ip} > /stream_report.txt
 """
 
 router = APIRouter()
@@ -227,7 +227,8 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
     if not server.hostname:
         server.hostname = str(uuid4())[:9]
 
-    server.hostname = f"{server.hostname}.{CF_DOMAIN_NAME}"
+    server.hostname = f"{server.hostname}.streams"
+    server.fqdn = f"{server.hostname}.{CF_DOMAIN_NAME}"
 
     region = "ewr"
     public_key = generate_ssh_key()
@@ -251,7 +252,7 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                 "tags": [server.workspace],
                 "user_data": base64.b64encode(user_data_script.format(
                     uuid=server.uuid, host_url=SERVER_HOST_URL,
-                    record_name=f"{server.hostname}.{CF_DOMAIN_NAME}",
+                    record_name=f"{server.hostname}", fqdn=server.fqdn,
                     zone_id=CF_ZONE_ID, api_token=CF_API_TOKEN,
                     server_ip=PUBLIC_IP
                 ).encode()).decode('utf-8')

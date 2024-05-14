@@ -14,6 +14,7 @@ function WorkspaceView() {
     const [selectedServer, setSelectedServer] = useState(null);
     const [showModal, setShowModal] = useState(false);
     const [newServerName, setNewServerName] = useState('');
+    const [newServerHostname, setNewServerHostname] = useState('');
     const [loading, setLoading] = useState(false);
     const ws = useRef(null);
     const { user, setUser } = useUser();
@@ -128,11 +129,12 @@ function WorkspaceView() {
     const handleCreateServer = async () => {
         setLoading(true);
         try {
-            const response = await API.post(`/streamservers/`, { label: newServerName, workspace: uuid });
+            const response = await API.post(`/streamservers/`, { label: newServerName, hostname: newServerHostname, workspace: uuid });
             setStreamServers([...streamServers, response.data]);
             console.log("Response", response)
             setShowModal(false);
             setNewServerName('');
+            setNewServerHostname('');
         } catch (error) {
             console.error('Error creating new stream server:', error);
         } finally {
@@ -383,6 +385,14 @@ function WorkspaceView() {
                                 type="text"
                                 value={newServerName}
                                 onChange={(e) => setNewServerName(e.target.value)}
+                            />
+                        </Form.Group>
+                        <Form.Group>
+                            <Form.Label>Hostname</Form.Label>
+                            <Form.Control
+                                type="text"
+                                value={newServerHostname}
+                                onChange={(e) => setNewServerHostname(e.target.value)}
                             />
                         </Form.Group>
                     </Form>

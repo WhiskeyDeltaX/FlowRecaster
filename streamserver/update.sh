@@ -3,9 +3,12 @@
 SERVER_UUID="$1"
 SERVER_HOST="$2"
 RECORD_NAME="$3"
-ZONE_ID="$4"
-CF_API_TOKEN="$5"
-SERVER_IP="$6"
+FQDN_NAME="$4"
+ZONE_ID="$5"
+CF_API_TOKEN="$6"
+SERVER_IP="$7"
+
+echo $@
 
 PUBLIC_IP=$(curl -s http://ipinfo.io/ip)
 echo "Detected public IP: $PUBLIC_IP"
@@ -31,7 +34,7 @@ update_dns_record() {
 echo "---Updating---"
 sudo apt update
 echo "---Installing nginx---"
-sudo apt install -y nginx libnginx-mod-rtmp git ffmpeg htop curl jq certbot python-certbot-nginx
+sudo apt install -y nginx libnginx-mod-rtmp git ffmpeg htop curl jq certbot python3-certbot-nginx
 
 # Check if the DNS record already exists
 record_id=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$RECORD_NAME" \
@@ -87,8 +90,8 @@ ufw allow 80
 ufw allow 443
 ufw allow 19751
 
-sleep 60
+sleep 120
 
-sudo certbot --nginx -d $RECORD_NAME
+sudo certbot --email mail@$FQDN_NAME --agree-tos --non-interactive --nginx -d $FQDN_NAME
 
 echo "---Finished---"
