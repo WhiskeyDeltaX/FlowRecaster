@@ -17,7 +17,8 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
 ## Setup
 ### Domain Configuration
 1. Pick a domain and add an A record in your DNS settings to point to the IP address of your web service.
-2. For this README, we will assume the domain is `flowrecaster.com`.
+
+For this README, we will assume the domain is `flowrecaster.com`.
 
 ### Webclient Setup
 2. On your local machine or the web server:
@@ -33,6 +34,9 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
 ### Webserver Setup
 3. On your web server (Assumed Debian 12):
    ```bash
+   
+   
+   
    # Assuming SSH access to your server
    cd .. # Now we are at the root of the git project)
    
@@ -40,6 +44,10 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
    scp -r webserver/* yourserver:/FlowRecaster
    
    ssh yourserver
+
+   # Install code-server if you want
+   # curl -fsSL https://code-server.dev/install.sh | sh
+
    cd /FlowRecaster
    pip3 install -r requirements.txt
    # Add a new system user called "flowrecaster"
@@ -53,8 +61,13 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
     sudo apt update
     
     # Install MongoDB
-    sudo apt install -y mongodb
-    
+    curl -fsSL https://pgp.mongodb.com/server-7.0.asc |sudo gpg  --dearmor -o /etc/apt/trusted.gpg.d/mongodb-server-7.0.gpg
+    echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+    sudo apt-get update
+    sudo apt-get install -y mongodb-org
+    sudo systemctl start mongod
+    sudo systemctl enable mongod
+
     # Install Nginx
     sudo apt install -y nginx
     
