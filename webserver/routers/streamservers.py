@@ -20,7 +20,7 @@ from utils import ser
 user_data_script = """#!/bin/bash
 wget https://raw.githubusercontent.com/WhiskeyDeltaX/FlowRecaster/main/streamserver/update.sh
 chmod +x update.sh
-./update.sh {uuid} {host_url} {record_name} {fqdn} {zone_id} {api_token} {server_ip} {stream_key} {youtube_key} > /stream_report.txt
+./update.sh {uuid} {host_url} {fqdn} {zone_id} {api_token} {server_ip} {stream_key} {youtube_key} {backup_mp4} > /stream_report.txt
 """
 
 router = APIRouter()
@@ -257,10 +257,11 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
                 "tags": [server.workspace],
                 "user_data": base64.b64encode(user_data_script.format(
                     uuid=server.uuid, host_url=SERVER_HOST_URL,
-                    record_name=f"{server.hostname}", fqdn=server.fqdn,
+                    fqdn=server.fqdn,
                     zone_id=CF_ZONE_ID, api_token=CF_API_TOKEN,
                     server_ip=PUBLIC_IP, stream_key=server.stream_key,
-                    youtube_key=server.youtube_key or "None"
+                    youtube_key=server.youtube_key or "None",
+                    backup_mp4=BACKUP_MP4_URL
                 ).encode()).decode('utf-8')
             },
             headers={"Authorization": f"Bearer {VULTR_API_KEY}"}
@@ -290,7 +291,7 @@ async def create_streamserver(server: StreamServer, user: dict = Depends(get_cur
         server.service_uuid = server_data['instance']['id']
         server.internal_ip = server_data['instance']['internal_ip']
 
-        server.is_streaming = False
+        server.is_youtube_streaming = False
 
         await stream_servers_table.insert_one(server.dict())
         return ser(server.dict())
@@ -310,6 +311,7 @@ async def update_streamserver(server_id: str, update_data: UpdateStreamServer, u
         raise HTTPException(status_code=404, detail="Server not found or access denied")
 
     update_data = update_data.dict(exclude_unset=True)
+    update_data["is_youtube_streaming"] = False
 
     if update_data:
         await stream_servers_table.update_one(
@@ -321,15 +323,16 @@ async def update_streamserver(server_id: str, update_data: UpdateStreamServer, u
         server["stream_key"] = update_data["stream_key"]
         server["youtube_key"] = update_data["youtube_key"]
         server["noise_reduction"] = update_data["noise_reduction"]
+        server["is_youtube_streaming"] = update_data["is_youtube_streaming"]
 
     return ser(server)
 
-async def delete_dns_record(client, hostname):
+async def delete_dns_record(client, fqdn):
     # Retrieve the DNS record ID
     dns_records_response = await client.get(
         f"https://api.cloudflare.com/client/v4/zones/{CF_ZONE_ID}/dns_records",
         headers={"Authorization": f"Bearer {CF_API_TOKEN}"},
-        params={"type": "A", "name": hostname}
+        params={"type": "A", "name": fqdn}
     )
     dns_records_response.raise_for_status()
     dns_records = dns_records_response.json()
@@ -355,11 +358,11 @@ async def delete_streamserver(server_id: str, user: dict = Depends(get_current_u
         raise HTTPException(status_code=404, detail="Server not found or access denied")
 
     async with httpx.AsyncClient() as client:
-        if 'hostname' in server and server['hostname']:
-            print("Deleting", server["hostname"])
+        if 'fqdn' in server and server['fqdn']:
+            print("Deleting", server["fqdn"])
     
         try:
-            await delete_dns_record(client, server['hostname'])
+            await delete_dns_record(client, server['fqdn'])
         except Exception as e:
             print("DNS failed to delete", e)
 
@@ -444,3 +447,39 @@ async def report_status(status: ServerStatus):
     await manager.broadcast({"type": "status_report", "data": {"uuid": status["server_uuid"], "status": ser(status)}}, server["workspace"])
 
     return {"message": "Status reported successfully"}
+
+class StreamServerStream(BaseModel):
+    status: bool = False
+
+@router.post("/streamservers/streaming/{server_id}")
+async def streamserver_streaming(server_id: str, status_data: StreamServerStream, user: dict = Depends(get_current_user)):
+    server = await stream_servers_table.find_one({"uuid": str(server_id)})
+    user_data = await users_table.find_one({"email": user}, {"_id": 0, "password": 0})
+
+    if not server or (user_data["role"] != "admin" and server.workspace not in user_data["workspaces"]):
+        raise HTTPException(status_code=404, detail="Server not found or access denied")
+
+    print("Changing to status", status_data.status)
+
+    if status_data.status:
+        url = f"https://{server['fqdn']}/start-youtube-stream/"
+    else:
+        url = f"https://{server['fqdn']}/stop-youtube-stream/"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+
+        print("Response:", response)
+
+        update_data = {
+            "is_youtube_streaming": status_data.status
+        }
+
+        await stream_servers_table.update_one(
+            {"uuid": str(server_id)},
+            {"$set": update_data}
+        )
+
+        server["is_youtube_streaming"] = status_data.status
+
+        return ser(server)

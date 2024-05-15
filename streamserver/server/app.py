@@ -36,6 +36,19 @@ __version__ = "1.0.0"
 # Configuration management
 config_file = "stream_config.json"
 
+def get_size(nbytes, suffix="bps"):
+    """
+    Scale bytes to its proper format
+    e.g:
+        1253656 => '1.20MB'
+        1253656678 => '1.17GB'
+    """
+    factor = 1024
+    for unit in ["", "k", "m", "g", "t", "p"]:
+        if nbytes < factor:
+            return f"{int(nbytes)} {unit}{suffix}"
+        nbytes /= factor
+
 def load_config():
     if os.path.isfile("/flowrecaster_uuid.txt"):
         with open("/flowrecaster_uuid.txt", 'r') as file:
@@ -85,7 +98,7 @@ def load_config():
         return {
             "stream1_url": f"rtmp://localhost:8453/live/{stream_key}",
             "stream2_url": os.getenv("STREAM2_URL"),
-            "mp4_url": os.getenv("MP4_URL", "video.mp4"),
+            "mp4_url": os.getenv("MP4_URL", "/backup.mp4"),
             "active_source": "stream1",
             "server_uuid": server_uuid,
             "server_host": server_host,
@@ -137,12 +150,16 @@ async def check_stream():
     while True:
         await asyncio.sleep(5)  # Non-blocking wait
         
-        if ffmpeg_process and ffmpeg_process.poll() is not None:
+        if ffmpeg_process:
             current_source = config['active_source']
             current_url = config[f'{current_source}_url']
 
             if current_source != 'mp4':
-                stream1_live = await is_hls_stream_live(convert_url_rtmp_to_hls(current_url))
+                try:
+                    stream_live = await is_hls_stream_live(convert_url_rtmp_to_hls(current_url))
+                except Exception as e:
+                    print("failed to see if URL was live")
+                    stream_live = False
 
                 if not stream_live:
                     print(f"{current_source} failure detected.")
@@ -153,7 +170,7 @@ async def check_stream():
                         await report_failure()
                         
                         # Check if the stream comes back online
-                        while not await is_stream_live(current_url):
+                        while not await is_hls_stream_live(convert_url_rtmp_to_hls(current_url)):
                             print ("Stream is still not live yet")
                             await asyncio.sleep(5)
                             # Check if the active source has been changed externally
@@ -252,52 +269,74 @@ def convert_url_rtmp_to_hls(rtmp_url):
 
 async def report_system_status():
     global config
+    global ffmpeg_process
+
+    net_start = datetime.now()
+    net_io = psutil.net_io_counters()
+    init_bytes_sent = net_io.bytes_sent
+    init_bytes_recv = net_io.bytes_recv
 
     while True:
         await asyncio.sleep(30)  # Report every minute
         print("Reporting System Status")
         
-        # Collect system metrics
-        cpu_usage = psutil.cpu_percent(interval=1)
-        ram_usage = psutil.virtual_memory().percent
-        net_io = psutil.net_io_counters()
-        bytes_sent = net_io.bytes_sent
-        bytes_recv = net_io.bytes_recv
-        
-        # Check FFmpeg stream status
-        ffmpeg_alive = not (ffmpeg_process and ffmpeg_process.poll() is not None)
+        try:
+            # Collect system metrics
+            cpu_usage = psutil.cpu_percent(interval=1)
+            ram_usage = psutil.virtual_memory().percent
+            net_io = psutil.net_io_counters()
 
-        print("Checking URLs")
-        stream1_live = await is_hls_stream_live(convert_url_rtmp_to_hls(config['stream1_url']))
-        stream2_live = await is_hls_stream_live(convert_url_rtmp_to_hls(config['stream2_url']))
-        
-        # Prepare the payload
-        payload = {
-            "server_uuid": config["server_uuid"],
-            "cpu_usage": cpu_usage,
-            "ram_usage": ram_usage,
-            "bytes_sent": bytes_sent,
-            "bytes_recv": bytes_recv,
-            "selected_source": config["active_source"],
-            "youtube_key": config["youtube_key"],
-            "ffmpeg_alive": ffmpeg_alive,
-            "stream1_live": stream1_live,
-            "stream2_live": stream2_live,
-            "stream1_url": config['stream1_url'] or "",
-            "stream2_url": config['stream2_url'] or "",
-            "noise_reduction": config.get("Noise Reduction", "0")
-        }
+            net_now = datetime.now()
+            duration_seconds = (net_now - net_start).total_seconds()
 
-        print("Sending payload", payload)
-        
-        # Send the status to the central server
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(f'{config["server_host"]}/api/v1/streamservers/report_status', json=payload)
-                response.raise_for_status()  # Will raise an exception for 4XX/5XX responses
-                print(f"Status reported successfully at {datetime.now()}")
-            except httpx.HTTPError as e:
-                print(f"Failed to report status: {e}")
+            bytes_sent = (net_io.bytes_sent - init_bytes_sent) / duration_seconds
+            bytes_recv = (net_io.bytes_recv - init_bytes_recv) / duration_seconds
+
+            init_bytes_sent = bytes_sent
+            init_bytes_recv = bytes_recv
+            net_start = net_now
+            
+            # Check FFmpeg stream status
+            ffmpeg_alive = ffmpeg_process and ffmpeg_process.returncode is None
+
+            print("ffmpeg?", ffmpeg_process)
+            
+            if ffmpeg_process:
+                print("Poll?", ffmpeg_process.returncode)
+
+            print("Checking URLs")
+            stream1_live = await is_hls_stream_live(convert_url_rtmp_to_hls(config['stream1_url']))
+            stream2_live = await is_hls_stream_live(convert_url_rtmp_to_hls(config['stream2_url']))
+            
+            # Prepare the payload
+            payload = {
+                "server_uuid": config["server_uuid"],
+                "cpu_usage": cpu_usage,
+                "ram_usage": ram_usage,
+                "bytes_sent": get_size(bytes_sent*8),
+                "bytes_recv": get_size(bytes_recv*8),
+                "selected_source": config["active_source"],
+                "youtube_key": config["youtube_key"],
+                "ffmpeg_alive": ffmpeg_alive,
+                "stream1_live": stream1_live,
+                "stream2_live": stream2_live,
+                "stream1_url": config['stream1_url'] or "",
+                "stream2_url": config['stream2_url'] or "",
+                "noise_reduction": config.get("Noise Reduction", "0")
+            }
+
+            print("Sending payload", payload)
+            
+            # Send the status to the central server
+            async with httpx.AsyncClient() as client:
+                try:
+                    response = await client.post(f'{config["server_host"]}/api/v1/streamservers/report_status', json=payload)
+                    response.raise_for_status()  # Will raise an exception for 4XX/5XX responses
+                    print(f"Status reported successfully at {datetime.now()}")
+                except httpx.HTTPError as e:
+                    print(f"Failed to report status: {e}")
+        except Exception as e:
+            print("Main status look had failure", e)
 
 async def is_stream_live(stream_url):
     if not stream_url:
@@ -328,14 +367,8 @@ async def start_youtube_stream_directly(stream_url):
     print("Starting stream direct", stream_url)
 
     if ffmpeg_process:
-        print("Killing")
-        try:
-            # Terminate the process group
-            os.killpg(os.getpgid(ffmpeg_process.pid), signal.SIGKILL)
-            ffmpeg_process.wait()  # Wait for the process to terminate
-        except:
-            print("Failed to kill pid", ffmpeg_process.pid)
-        
+        ffmpeg_process.terminate()
+        await ffmpeg_process.wait()
         ffmpeg_process = None
 
         await asyncio.sleep(2)
@@ -350,6 +383,7 @@ async def start_youtube_stream_directly(stream_url):
     ca = "copy"
 
     additional_commands = []
+    more_additional_commands = []
 
     if not stream_url.endswith(".mp4"):
         if "Noise Reduction" in config and config["Noise Reduction"]:
@@ -367,13 +401,30 @@ async def start_youtube_stream_directly(stream_url):
             if nr_amount > 0:
                 additional_commands.append(f'-af "afftdn=nr={nr_amount}"')
                 ca = "aac"
+    else:
+        more_additional_commands.append("-stream_loop -1 -re")
 
-    command = f'ffmpeg -re -i {stream_url} {" ".join(additional_commands)} -c:v {cv} -c:a {ca} -f flv -x264-params keyint=120:min-keyint=120 rtmp://a.rtmp.youtube.com/live2/{youtube_key}'
+    command = f'ffmpeg {" ".join(more_additional_commands)} -i {stream_url} {" ".join(additional_commands)} -c:v {cv} -c:a {ca} -g 60 -f flv -x264-params keyint=60:min-keyint=60:no-scenecut=1 -drop_pkts_on_overflow 1 -attempt_recovery 1 -recovery_wait_time 1 rtmp://a.rtmp.youtube.com/live2/{youtube_key}'
     print("Final Command", command)
 
-    ffmpeg_process = Popen(command, stdout=PIPE, stderr=PIPE, bufsize=1,
-        universal_newlines=True, shell=True,
-        preexec_fn=os.setsid)
+    # ffmpeg_process = Popen(command, stdout=PIPE, stderr=PIPE, bufsize=1,
+    #     universal_newlines=True, shell=True)
+
+    ffmpeg_process = await asyncio.create_subprocess_shell(
+        command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+
+    # Kick off the log monitoring as a background task
+    # asyncio.create_task(log_ffmpeg_output(ffmpeg_process))
+
+async def log_ffmpeg_output(process):
+    """ Log output from FFmpeg to check for any errors or important information. """
+    async for line in process.stderr:
+        if line:
+            print("FFMPEG", line.decode().strip())
+    await process.wait()
 
 @app.get("/start-youtube-stream/")
 async def start_youtube_stream():
@@ -387,8 +438,13 @@ async def start_youtube_stream():
 async def stop_youtube_stream():
     global ffmpeg_process
     if ffmpeg_process:
+        print("Killing")
         ffmpeg_process.terminate()
         ffmpeg_process = None
+
+        await asyncio.sleep(2)
+        print("Should be dead")
+
     return {"message": "YouTube stream stopped"}
 
 @app.post("/switch-stream/")

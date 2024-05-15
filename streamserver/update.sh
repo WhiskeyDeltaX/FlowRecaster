@@ -2,13 +2,13 @@
 
 SERVER_UUID="$1"
 SERVER_HOST="$2"
-RECORD_NAME="$3"
-FQDN_NAME="$4"
-ZONE_ID="$5"
-CF_API_TOKEN="$6"
-SERVER_IP="$7"
-STREAM_KEY="$8"
-YOUTUBE_KEY="$9"
+FQDN_NAME="$3"
+ZONE_ID="$4"
+CF_API_TOKEN="$5"
+SERVER_IP="$6"
+STREAM_KEY="$7"
+YOUTUBE_KEY="$8"
+BACKUP_MP4="$9"
 
 echo $@
 
@@ -16,21 +16,21 @@ PUBLIC_IP=$(curl -s http://ipinfo.io/ip)
 echo "Detected public IP: $PUBLIC_IP"
 
 create_dns_record() {
-    echo "Creating new DNS record for $RECORD_NAME with IP $PUBLIC_IP"
+    echo "Creating new DNS record for $FQDN_NAME with IP $PUBLIC_IP"
     curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
          -H "Authorization: Bearer $CF_API_TOKEN" \
          -H "Content-Type: application/json" \
-         --data '{"type":"A","name":"'"$RECORD_NAME"'","content":"'"$PUBLIC_IP"'","ttl":1,"proxied":false}' | jq
+         --data '{"type":"A","name":"'"$FQDN_NAME"'","content":"'"$PUBLIC_IP"'","ttl":1,"proxied":false}' | jq
 }
 
 # Function to update an existing DNS record
 update_dns_record() {
     local record_id=$1
-    echo "Updating existing DNS record for $RECORD_NAME with IP $PUBLIC_IP"
+    echo "Updating existing DNS record for $FQDN_NAME with IP $PUBLIC_IP"
     curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$record_id" \
          -H "Authorization: Bearer $CF_API_TOKEN" \
          -H "Content-Type: application/json" \
-         --data '{"type":"A","name":"'"$RECORD_NAME"'","content":"'"$PUBLIC_IP"'","ttl":1,"proxied":false}' | jq
+         --data '{"type":"A","name":"'"$FQDN_NAME"'","content":"'"$PUBLIC_IP"'","ttl":1,"proxied":false}' | jq
 }
 
 echo "---Updating---"
@@ -39,7 +39,7 @@ echo "---Installing nginx---"
 sudo apt install -y nginx libnginx-mod-rtmp git ffmpeg htop curl jq certbot python3-certbot-nginx
 
 # Check if the DNS record already exists
-record_id=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$RECORD_NAME" \
+record_id=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$FQDN_NAME" \
              -H "Authorization: Bearer $CF_API_TOKEN" \
              | jq -r '.result[0].id')
 
@@ -99,6 +99,9 @@ ufw allow 443
 ufw allow 19751
 
 systemctl reload nginx
+
+wget $BACKUP_MP4 -O /backup.mp4
+chown www-data:www-data /backup.mp4
 
 sleep 120
 

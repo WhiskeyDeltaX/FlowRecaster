@@ -39,7 +39,7 @@ class StreamServer(BaseModel):
     stream_key: str = None
     youtube_key: str = None
     noise_reduction: str = None
-    is_streaming: bool = False
+    is_youtube_streaming: bool = False
 
 class ServerStatus(BaseModel):
     server_uuid: str
@@ -47,11 +47,11 @@ class ServerStatus(BaseModel):
     uuid:  str = None
     cpu_usage: float
     ram_usage: float
-    bytes_sent: int
-    bytes_recv: int
+    bytes_sent: str
+    bytes_recv: str
     selected_source: str
     youtube_key: str
-    ffmpeg_active: bool = False
+    ffmpeg_alive: bool = False
     stream1_live: bool = False
     stream2_live: bool = False
     noise_reduction: str = None

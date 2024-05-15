@@ -42,6 +42,34 @@ function WorkspaceView() {
         };
     }, [uuid]);
 
+    const [lastHeartbeats, setLastHeartbeats] = useState({});
+
+    // Effect to set up the interval check
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const now = Date.now();
+            const newHeartbeats = { ...lastHeartbeats };
+
+            Object.keys(newHeartbeats).forEach(uuid => {
+                if (now - newHeartbeats[uuid] > 30000) { // 30 seconds
+                    // Set server hasHeartbeat to false locally
+                    streamServers = streamServers.map(server => {
+                        if (server.uuid === uuid) {
+                            return { ...server, hasHeartbeat: false };
+                        }
+                        return server;
+                    });
+                    
+                    setStreamServers(streamServers);
+                }
+            });
+
+            setLastHeartbeats(newHeartbeats);
+        }, 30000); // check every 30 seconds
+
+        return () => clearInterval(interval);
+    }, [lastHeartbeats]);
+
     const connectWebSocket = () => {
         const token = user.access_token;
         ws.current = new WebSocket(`${process.env.REACT_APP_API_SOCKET}/ws/updates/${uuid}?token=${token}`);
@@ -81,6 +109,7 @@ function WorkspaceView() {
 
                 if (updateServer) {
                     Object.assign(updateServer, message.data);
+                    updateServer.hasHeartbeat = true;
 
                     if (selectedServer && selectedServer.uuid === updateServer.uuid) {
                         setSelectedServer(updateServer);
@@ -91,16 +120,24 @@ function WorkspaceView() {
                 
                 return currentStreamServers.slice();
             });
+
+            setLastHeartbeats(currentHeartBeats => {
+                currentHeartBeats[message.data.uuid] = Date.now();
+                return {...currentHeartBeats};
+            });
         } else if (message.type === 'status_report' && message.data.uuid) {
             setStreamServers(currentStreamServers => {
-                console.log("Current Stream Servers", currentStreamServers)
+                console.log("Current Stream Servers", currentStreamServers, message.data.status)
 
                 const updateServer = currentStreamServers.find(s => s.uuid === message.data.uuid);
 
                 if (updateServer) {
                     updateServer.hasHeartbeat = true;
                     updateServer.stream1 = message.data.status.stream1_live;
+                    updateServer.hasFFmpeg = message.data.status.ffmpeg_alive;
                     updateServer.last_status_update = message.data.status;
+
+                    console.log("Updated server", updateServer);
 
                     if (selectedServer && selectedServer.uuid === updateServer.uuid) {
                         setSelectedServer(updateServer);
@@ -108,6 +145,11 @@ function WorkspaceView() {
                 }
 
                 return currentStreamServers.slice();
+            });
+
+            setLastHeartbeats(currentHeartBeats => {
+                currentHeartBeats[message.data.uuid] = Date.now();
+                return {...currentHeartBeats};
             });
         }
     };
@@ -139,7 +181,8 @@ function WorkspaceView() {
                 hostname: newServerHostname,
                 youtube_key: newYoutubeKey,
                 stream_key: newStreamKey,
-                workspace: uuid });
+                workspace: uuid
+            });
             setStreamServers([...streamServers, response.data]);
             console.log("Response", response)
             setShowModal(false);
@@ -226,12 +269,22 @@ function WorkspaceView() {
         });
     };
 
-    const handleStartStream = () => {
+    const handleStartStream = async (status) => {
+        if (window.confirm("Are you sure you would like to do this?")) {
+            const s = streamServers.find(s => s.uuid === selectedServer.uuid);
 
-    }
+            if (s) {
+                const response = await API.post(`/streamservers/streaming/${selectedServer.uuid}`, {
+                    status
+                });
+                Object.assign(s, response.data);
 
-    const handleStopStream = () => {
+                setStreamServers([...streamServers]);
 
+                console.log("Response", response)
+                setShowEditModal(false);
+            }
+        }
     }
 
     const handleDeleteClick = async (data) => {
@@ -300,6 +353,9 @@ function WorkspaceView() {
                                     <Badge pill bg={server.stream1 ? "success" : "danger"}>
                                         {server.stream1 ? "Stream 1" : "Stream 1"}
                                     </Badge>
+                                    <Badge pill bg={server.hasFFmpeg ? "success" : "danger"}>
+                                        {server.stream1 ? "FFmpeg" : "FFmpeg"}
+                                    </Badge>
                                 </div>
                             </ListGroup.Item>
                         ))}
@@ -311,8 +367,8 @@ function WorkspaceView() {
                             <div className="d-flex justify-content-between align-items-center mb-3">
                                 <h3>{selectedServer.label}</h3>
                                 <ButtonGroup>
-                                    <Button variant="success" onClick={handleStartStream}>Start Stream</Button>
-                                    <Button variant="danger" onClick={handleStopStream}>Stop Stream</Button>
+                                    <Button variant="success" disabled={selectedServer.is_youtube_streaming} onClick={() => handleStartStream(true)}>Start YouTube</Button>
+                                    <Button variant="danger" disabled={!selectedServer.is_youtube_streaming} onClick={() => handleStartStream(false)}>Stop YouTube</Button>
                                     <Button variant="secondary" onClick={() => setSelectedServer(null)}>Close</Button>
                                     <Button variant="primary" onClick={() => openEditModal(selectedServer)}>Edit</Button>
                                 </ButtonGroup>
@@ -356,13 +412,13 @@ function WorkspaceView() {
                                             <tr>
                                                 <td>Bytes Sent</td>
                                                 <td>
-                                                    {selectedServer.last_status_update.bytes_sent ? (selectedServer.last_status_update.bytes_sent * 8 / 1000).toLocaleString() + ' kbps' : 'N/A'}
+                                                    {selectedServer.last_status_update.bytes_sent ? selectedServer.last_status_update.bytes_sent : 'N/A'}
                                                 </td>
                                             </tr>
                                             <tr>
                                                 <td>Bytes Received</td>
                                                 <td>
-                                                    {selectedServer.last_status_update.bytes_recv ? (selectedServer.last_status_update.bytes_recv * 8 / 1000).toLocaleString() + ' kbps' : 'N/A'}
+                                                    {selectedServer.last_status_update.bytes_recv ? selectedServer.last_status_update.bytes_recv : 'N/A'}
                                                 </td>
                                             </tr>
                                             <tr>
@@ -374,8 +430,8 @@ function WorkspaceView() {
                                                 <td>{selectedServer.last_status_update.youtube_key}</td>
                                             </tr>
                                             <tr>
-                                                <td>FFmpeg Active</td>
-                                                <td>{selectedServer.last_status_update.ffmpeg_active ? "Yes" : "No"}</td>
+                                                <td>FFmpeg Alive</td>
+                                                <td>{selectedServer.last_status_update.ffmpeg_alive ? "Yes" : "No"}</td>
                                             </tr>
                                             <tr>
                                                 <td>Stream 1 Live</td>
@@ -425,7 +481,7 @@ function WorkspaceView() {
                                         </tr>
                                         <tr>
                                             <td>Memory</td>
-                                            <td>{selectedServer.memory ? `${selectedServer.memory} GB` : "N/A"}</td>
+                                            <td>{selectedServer.memory ? `${selectedServer.memory} MB` : "N/A"}</td>
                                         </tr>
                                         <tr>
                                             <td>Cost</td>
@@ -502,10 +558,12 @@ function WorkspaceView() {
                     </Form>
                 </Modal.Body>
                 <Modal.Footer>
-                    <Button variant="secondary" onClick={() => setShowModal(false)}>Close</Button>
-                    <Button variant="primary" onClick={handleCreateServer} disabled={loading}>
-                        {loading ? 'Creating...' : 'Create'}
-                    </Button>
+                    <div className="d-flex justify-content-between">
+                        <Button variant="secondary" onClick={() => setShowModal(false)}>Close</Button>
+                        <Button variant="primary" onClick={handleCreateServer} disabled={loading}>
+                            {loading ? 'Creating...' : 'Create'}
+                        </Button>
+                    </div>
                 </Modal.Footer>
             </Modal>
         </Container>
