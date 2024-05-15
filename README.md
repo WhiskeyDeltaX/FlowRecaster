@@ -28,6 +28,13 @@ For this README, we will assume the domain is `flowrecaster.com`.
    # Install npm if needed
    # curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
    # sudo apt-get install -y nodejs
+
+   nano .env
+
+   ```
+   REACT_APP_API_URL=https://flowrecaster.com/api/v1
+   REACT_APP_API_SOCKET=wss://flowrecaster.com/api/v1
+   ```
    
    npm install
    # Add your domain to the environment file
