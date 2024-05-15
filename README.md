@@ -53,7 +53,7 @@ For this README, we will assume the domain is `flowrecaster.com`.
    cd .. # Now we are at the root of the git project)
    
    # Copy the webserver files to the FlowRecaster directory
-   scp -r webserver/* yourserver:/FlowRecaster
+   scp -r webserver/* yourserver:/flowrecaster
    
    ssh yourserver
 
@@ -64,7 +64,7 @@ For this README, we will assume the domain is `flowrecaster.com`.
    pip3 install -r requirements.txt
    # Add a new system user called "flowrecaster"
    sudo useradd -m flowrecaster
-   sudo chown flowrecaster:flowrecaster -R /FlowRecaster
+   sudo chown flowrecaster:flowrecaster -R /flowrecaster
    ```
 
    Install Nginx and MongoDB if you don't have it
@@ -93,7 +93,7 @@ For this README, we will assume the domain is `flowrecaster.com`.
     ufw allow 443
    ```
 
-   Add an `/FlowRecaster/.env` file with your local variables
+   Add an `/flowrecaster/.env` file with your local variables
    ```bash
    VULTR_API_KEY=ZTHJSDFGTJHFDGSDFGER5GSDFG
    PUBLIC_IP=8.8.4.4
@@ -154,7 +154,7 @@ For this README, we will assume the domain is `flowrecaster.com`.
    [Service]
    User=flowrecaster
    Group=www-data
-   WorkingDirectory=/FlowRecaster
+   WorkingDirectory=/flowrecaster
    Environment="PATH=/usr/bin/python3"
    ExecStart=/usr/local/bin/gunicorn --workers 3 --bind unix:flowrecaster.sock -m 007 --worker-class uvicorn.workers.UvicornWorker app:app
 
