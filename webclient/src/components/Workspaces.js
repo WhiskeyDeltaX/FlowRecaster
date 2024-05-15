@@ -19,7 +19,7 @@ function Workspaces() {
     useEffect(() => {
         console.log(user);
         fetchWorkspaces();
-    }, []);
+    }, [user]);
 
     const fetchWorkspaces = async () => {
         try {
