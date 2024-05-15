@@ -24,6 +24,11 @@ For this README, we will assume the domain is `flowrecaster.com`.
 2. On your local machine or the web server:
    ```bash
    cd webclient
+
+   # Install npm if needed
+   # curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+   # sudo apt-get install -y nodejs
+   
    npm install
    # Add your domain to the environment file
    npm run build
