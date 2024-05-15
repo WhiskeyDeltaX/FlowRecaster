@@ -23,8 +23,8 @@ export const UserProvider = ({ children }) => {
         // Optionally, listen to storage events to synchronize state across tabs
         const handleStorageChange = (event) => {
             if (event.key === 'user') {
-                setUser(event.newValue ? JSON.parse(event.newValue) : null);
                 setAuthToken(event.newValue.access_token);
+                setUser(event.newValue ? JSON.parse(event.newValue) : null);
             }
         };
 
