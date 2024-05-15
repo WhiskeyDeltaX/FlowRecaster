@@ -47,7 +47,8 @@ For this README, we will assume the domain is `flowrecaster.com`.
 3. On your web server (Assumed Debian 12):
    ```bash
    
-   
+   # Remember to IP whitelist your VM in Vultr API settings
+   # You may need to whitelist both IPv4 and IPv6 (asdf::/128)
    
    # Assuming SSH access to your server
    cd .. # Now we are at the root of the git project)
