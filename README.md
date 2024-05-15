@@ -12,6 +12,7 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
 - Debian-ish Web Server running Python 3.8+
 - Locally (or on web server) Node.js 14+
 - Vultr account
+- Domain hosted on CloudFlare
 
 ## Setup
 ### Domain Configuration
@@ -66,10 +67,15 @@ FlowRecaster is a sophisticated FastAPI application designed for dynamic managem
 
    Add an `/FlowRecaster/.env` file with your local variables
    ```bash
-    VULTR_API_KEY=Z123123123123123123123123123
-    PUBLIC_IP=127.0.0.1
-    SSH_KEY_PATH=./server@flowrecaster.com.pem
-    SERVER_HOST_URL=https://flowrecaster.com
+   VULTR_API_KEY=ZTHJSDFGTJHFDGSDFGER5GSDFG
+   PUBLIC_IP=8.8.4.4
+   SSH_KEY_PATH=/server@flowrecaster.com.pem
+   VULTR_V4_SUBNET=10.69.2.0
+   SERVER_HOST_URL=https://flowrecaster.com
+   CF_API_TOKEN=asfefarsdgFregfdfgsdfgsdfgdrg
+   CF_ZONE_ID=123gdsg5r345tgwdfgsdfgsdfg
+   CF_DOMAIN_NAME=flowrecaster.com
+   BACKUP_MP4_URL=https://download.samplelib.com/mp4/sample-5s.mp4
    ```
    
    Add the following to your Nginx configuration `/etc/nginx/sites-enabled/flowrecaster.com`:
