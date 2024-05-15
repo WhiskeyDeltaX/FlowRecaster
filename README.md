@@ -81,6 +81,9 @@ For this README, we will assume the domain is `flowrecaster.com`.
     sudo systemctl enable mongodb
     sudo systemctl start nginx
     sudo systemctl enable nginx
+
+    ufw allow 80
+    ufw allow 443
    ```
 
    Add an `/FlowRecaster/.env` file with your local variables
