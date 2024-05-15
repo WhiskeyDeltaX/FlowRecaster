@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List
 from uuid import UUID, uuid4
 from datetime import datetime
+from typing import Optional
 
 class Workspace(BaseModel):
     name: str
@@ -51,7 +52,7 @@ class ServerStatus(BaseModel):
     bytes_recv: str
     selected_source: str
     youtube_key: str
-    ffmpeg_alive: bool = False
+    ffmpeg_alive: Optional[bool] = False
     stream1_live: bool = False
     stream2_live: bool = False
     noise_reduction: str = None

@@ -53,14 +53,14 @@ function WorkspaceView() {
             Object.keys(newHeartbeats).forEach(uuid => {
                 if (now - newHeartbeats[uuid] > 30000) { // 30 seconds
                     // Set server hasHeartbeat to false locally
-                    streamServers = streamServers.map(server => {
+                    const newStreamServers = streamServers.map(server => {
                         if (server.uuid === uuid) {
                             return { ...server, hasHeartbeat: false };
                         }
                         return server;
                     });
-                    
-                    setStreamServers(streamServers);
+
+                    setStreamServers(newStreamServers);
                 }
             });
 

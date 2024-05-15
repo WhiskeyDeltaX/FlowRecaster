@@ -80,7 +80,6 @@ chown flow:flow /flowrecaster_youtube_key.txt
 cp flowrecaster.service /etc/systemd/system/flowrecaster.service
 sudo systemctl daemon-reload
 sudo systemctl enable flowrecaster
-sudo systemctl restart flowrecaster
 
 sed -i "s/\$PUBLIC_IP/$SERVER_IP/g" nginx.conf
 sed -i "s/\$FQDN_NAME/$FQDN_NAME/g" nginx.conf
@@ -130,5 +129,7 @@ done
 sleep 10
 
 systemctl reload nginx
+
+sudo systemctl start flowrecaster
 
 echo "---Finished---"

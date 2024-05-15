@@ -317,7 +317,7 @@ async def report_system_status():
                 "bytes_recv": get_size(bytes_recv*8),
                 "selected_source": config["active_source"],
                 "youtube_key": config["youtube_key"],
-                "ffmpeg_alive": ffmpeg_alive,
+                "ffmpeg_alive": ffmpeg_alive or False,
                 "stream1_live": stream1_live,
                 "stream2_live": stream2_live,
                 "stream1_url": config['stream1_url'] or "",
@@ -345,6 +345,7 @@ async def is_stream_live(stream_url):
     """ Check if the given stream URL is live using ffprobe. """
     try:
         # Run ffprobe to check the stream status
+        # ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1
         result = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", 
              "default=noprint_wrappers=1:nokey=1", stream_url],

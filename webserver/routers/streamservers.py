@@ -30,6 +30,7 @@ SERVER_HOST_URL = os.getenv('SERVER_HOST_URL', "https://flowrecaster") # This is
 SSH_KEY_PATH = os.getenv('SSH_KEY_PATH', './server@flowrecaster.com.pem')
 VULTR_V4_SUBNET = os.getenv('VULTR_V4_SUBNET', "10.69.2.0")
 PUBLIC_IP = os.getenv('PUBLIC_IP', "127.0.0.1")
+BACKUP_MP4_URL = os.getenv('BACKUP_MP4_URL', "https://download.samplelib.com/mp4/sample-5s.mp4")
 
 # Cloudflare token
 # https://dash.cloudflare.com/profile/api-tokens
@@ -469,7 +470,10 @@ async def streamserver_streaming(server_id: str, status_data: StreamServerStream
     async with httpx.AsyncClient() as client:
         response = await client.get(url)
 
-        print("Response:", response)
+        print("Response", response.text)
+
+        if response.status_code > 399:
+            raise HTTPException(status_code=500, detail="YouTube stream failed to start")
 
         update_data = {
             "is_youtube_streaming": status_data.status
