@@ -23,8 +23,7 @@ function Login() {
         try {
             const data = await login(email, password);
             if (data.access_token) {
-                localStorage.setItem('access_token', data.access_token);
-                setUser(data.user);  // Update the user context with the logged in user
+                setUser(data);  // Update the user context with the logged in user
                 navigate('/dashboard');
             }
         } catch (error) {
