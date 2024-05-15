@@ -137,11 +137,15 @@ function WorkspaceView() {
                     updateServer.hasFFmpeg = message.data.status.ffmpeg_alive;
                     updateServer.last_status_update = message.data.status;
 
-                    console.log("Updated server", updateServer);
+                    console.log("selectedServer server", selectedServer);
 
-                    if (selectedServer && selectedServer.uuid === updateServer.uuid) {
-                        setSelectedServer(updateServer);
-                    }
+                    setSelectedServer(selectedServer => {
+                        if (selectedServer.uuid === updateServer.uuid) {
+                            return updateServer;
+                        } else {
+                            return selectedServer;
+                        }
+                    });
                 }
 
                 return currentStreamServers.slice();
@@ -367,8 +371,8 @@ function WorkspaceView() {
                             <div className="d-flex justify-content-between align-items-center mb-3">
                                 <h3>{selectedServer.label}</h3>
                                 <ButtonGroup>
-                                    <Button variant="success" disabled={selectedServer.is_youtube_streaming} onClick={() => handleStartStream(true)}>Start YouTube</Button>
-                                    <Button variant="danger" disabled={!selectedServer.is_youtube_streaming} onClick={() => handleStartStream(false)}>Stop YouTube</Button>
+                                    <Button variant="success" disabled={selectedServer.is_youtube_streaming && selectedServer.hasFFmpeg} onClick={() => handleStartStream(true)}>Start YouTube</Button>
+                                    <Button variant="danger" disabled={!selectedServer.is_youtube_streaming || !selectedServer.hasFFmpeg} onClick={() => handleStartStream(false)}>Stop YouTube</Button>
                                     <Button variant="secondary" onClick={() => setSelectedServer(null)}>Close</Button>
                                     <Button variant="primary" onClick={() => openEditModal(selectedServer)}>Edit</Button>
                                 </ButtonGroup>

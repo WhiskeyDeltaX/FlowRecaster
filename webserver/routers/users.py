@@ -11,7 +11,7 @@ from database import users_table
 
 router = APIRouter()
 
-@router.post("/users/", status_code=status.HTTP_201_CREATED)
+@router.post("/users", status_code=status.HTTP_201_CREATED)
 async def create_user(user: User):
     if await users_table.find_one({"email": user.email}):
         print("Email already exists")

@@ -312,7 +312,6 @@ async def update_streamserver(server_id: str, update_data: UpdateStreamServer, u
         raise HTTPException(status_code=404, detail="Server not found or access denied")
 
     update_data = update_data.dict(exclude_unset=True)
-    update_data["is_youtube_streaming"] = False
 
     if update_data:
         await stream_servers_table.update_one(
@@ -320,11 +319,27 @@ async def update_streamserver(server_id: str, update_data: UpdateStreamServer, u
             {"$set": update_data}
         )
 
+        changes_detected = False
+        config_changes = []
+
+        for key in ["stream_key", "youtube_key", "noise_reduction"]:
+            if key in update_data and update_data[key] != server.get(key):
+                changes_detected = True
+                config_changes.append({"configKey": key, "configValue": update_data[key]})
+
+        if changes_detected:
+            # Send the updated config to the streaming server
+            streaming_server_url = f"https://{server['fqdn']}/set-config/"
+            async with httpx.AsyncClient() as client:
+                response = await client.post(streaming_server_url, json={"config": config_changes})
+                print("Got response", response)
+                if response.status_code != 200:
+                    raise HTTPException(status_code=500, detail="Failed to update streaming server configuration")
+
         server["label"] = update_data["label"]
         server["stream_key"] = update_data["stream_key"]
         server["youtube_key"] = update_data["youtube_key"]
         server["noise_reduction"] = update_data["noise_reduction"]
-        server["is_youtube_streaming"] = update_data["is_youtube_streaming"]
 
     return ser(server)
 
@@ -473,7 +488,8 @@ async def streamserver_streaming(server_id: str, status_data: StreamServerStream
         print("Response", response.text)
 
         if response.status_code > 399:
-            raise HTTPException(status_code=500, detail="YouTube stream failed to start")
+            print("YouTube stream failed to start")
+            status_data.status = False
 
         update_data = {
             "is_youtube_streaming": status_data.status

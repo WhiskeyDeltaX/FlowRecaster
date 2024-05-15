@@ -14,6 +14,12 @@ import json
 import yt_dlp  # This is the module for downloading videos
 import aiohttp
 from datetime import datetime, timedelta
+import logging
+from typing import List, Dict
+
+# Initialize logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()  # Load environment variables
 
@@ -26,9 +32,12 @@ class StreamData(BaseModel):
     identifier: str  # stream1, stream2, or mp4
     url: str
 
-class ConfigRequest(BaseModel):
+class ConfigPair(BaseModel):
     configKey: str
     configValue: str
+
+class ConfigRequest(BaseModel):
+    config: List[ConfigPair]
 
 # Application version
 __version__ = "1.0.0"
@@ -46,7 +55,7 @@ def get_size(nbytes, suffix="bps"):
     factor = 1024
     for unit in ["", "k", "m", "g", "t", "p"]:
         if nbytes < factor:
-            return f"{int(nbytes)} {unit}{suffix}"
+            return f"{int(nbytes):.2f} {unit}{suffix}"
         nbytes /= factor
 
 def load_config():
@@ -121,6 +130,11 @@ FAILURE_THRESHOLD = 3  # Number of allowed consecutive failures
 
 @app.on_event("startup")
 async def startup_event():
+    global config
+    if "should_be_streaming" in config and config["should_be_streaming"]:
+        source_url = config[config["active_source"] + "_url"]
+        await start_youtube_stream_directly(source_url)
+
     asyncio.create_task(check_stream())
     asyncio.create_task(report_system_status())
     await notify_server_online()
@@ -148,11 +162,20 @@ async def check_stream():
     last_known_source = config['active_source']  # Track the last known active source
 
     while True:
-        await asyncio.sleep(5)  # Non-blocking wait
+        await asyncio.sleep(3)  # Non-blocking wait
+
+        current_source = config['active_source']
+        current_url = config[f'{current_source}_url']
         
         if ffmpeg_process:
-            current_source = config['active_source']
-            current_url = config[f'{current_source}_url']
+            if not await find_ffmpeg_processes():
+                failure_count += 1
+
+                if failure_count >= FAILURE_THRESHOLD:
+                    await start_youtube_stream_directly(current_url)
+                    failure_count = 0
+
+                continue
 
             if current_source != 'mp4':
                 try:
@@ -189,6 +212,11 @@ async def check_stream():
 
             # Update last known source for the next iteration
             last_known_source = config['active_source']
+        elif "should_be_streaming" in config and config["should_be_streaming"]:
+            failure_count += 1
+            if failure_count >= FAILURE_THRESHOLD:
+                await start_youtube_stream_directly(current_url)
+                failure_count = 0
 
 async def switch_to_backup_stream():
     await start_youtube_stream_directly(config['mp4_url'])
@@ -313,8 +341,10 @@ async def report_system_status():
                 "server_uuid": config["server_uuid"],
                 "cpu_usage": cpu_usage,
                 "ram_usage": ram_usage,
-                "bytes_sent": get_size(bytes_sent*8),
-                "bytes_recv": get_size(bytes_recv*8),
+                "bytes_sent": get_size(bytes_sent),
+                "bytes_recv": get_size(bytes_recv),
+                "bytes_sent_raw": bytes_sent,
+                "bytes_recv_raw": bytes_recv,
                 "selected_source": config["active_source"],
                 "youtube_key": config["youtube_key"],
                 "ffmpeg_alive": ffmpeg_alive or False,
@@ -322,7 +352,7 @@ async def report_system_status():
                 "stream2_live": stream2_live,
                 "stream1_url": config['stream1_url'] or "",
                 "stream2_url": config['stream2_url'] or "",
-                "noise_reduction": config.get("Noise Reduction", "0")
+                "noise_reduction": config.get("noise_reduction", "0")
             }
 
             print("Sending payload", payload)
@@ -363,16 +393,23 @@ async def is_stream_live(stream_url):
         return False
 
 async def start_youtube_stream_directly(stream_url):
-    global ffmpeg_process
+    global ffmpeg_process, config
 
     print("Starting stream direct", stream_url)
 
-    if ffmpeg_process:
-        ffmpeg_process.terminate()
-        await ffmpeg_process.wait()
-        ffmpeg_process = None
+    config["should_be_streaming"] = True
+    save_config(config)
 
-        await asyncio.sleep(2)
+    if ffmpeg_process:
+        try:
+            ffmpeg_process.kill()
+            await asyncio.sleep(1)
+            ffmpeg_process = None
+            await kill_ffmpeg_processes()
+
+            await asyncio.sleep(2)
+        except Exception as e:
+            print("Failed to kill ffmpeg", e)
         print("Should be dead")
 
     youtube_key = config["youtube_key"]
@@ -387,11 +424,11 @@ async def start_youtube_stream_directly(stream_url):
     more_additional_commands = []
 
     if not stream_url.endswith(".mp4"):
-        if "Noise Reduction" in config and config["Noise Reduction"]:
+        if "noise_reduction" in config and config["noise_reduction"]:
             nr_amount = 12
 
             try:
-                nr_amount = int(config["Noise Reduction"])
+                nr_amount = int(config["noise_reduction"])
                 if nr_amount > 97:
                     nr_amount = 97
                 elif nr_amount < 0:
@@ -403,19 +440,27 @@ async def start_youtube_stream_directly(stream_url):
                 additional_commands.append(f'-af "afftdn=nr={nr_amount}"')
                 ca = "aac"
     else:
-        more_additional_commands.append("-stream_loop -1 -re")
+        more_additional_commands.append("-stream_loop -1")
 
-    command = f'ffmpeg {" ".join(more_additional_commands)} -i {stream_url} {" ".join(additional_commands)} -c:v {cv} -c:a {ca} -g 60 -f flv -x264-params keyint=60:min-keyint=60:no-scenecut=1 -drop_pkts_on_overflow 1 -attempt_recovery 1 -recovery_wait_time 1 rtmp://a.rtmp.youtube.com/live2/{youtube_key}'
+    command = f'/usr/bin/ffmpeg -re {" ".join(more_additional_commands)} -i {stream_url} {" ".join(additional_commands)} -c:v {cv} -c:a {ca} -g 60 -f flv -x264-params keyint=60:min-keyint=60:no-scenecut=1 -drop_pkts_on_overflow 1 -attempt_recovery 1 -recovery_wait_time 1 rtmp://a.rtmp.youtube.com/live2/{youtube_key}'
     print("Final Command", command)
 
     # ffmpeg_process = Popen(command, stdout=PIPE, stderr=PIPE, bufsize=1,
     #     universal_newlines=True, shell=True)
 
-    ffmpeg_process = await asyncio.create_subprocess_shell(
-        command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
+    try:
+        ffmpeg_process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        # Log the output from FFmpeg process
+        asyncio.create_task(log_ffmpeg_output(ffmpeg_process))
+
+    except Exception as e:
+        logger.exception("Failed to start FFmpeg process.")
+        raise HTTPException(status_code=500, detail=str(e))
 
     # Kick off the log monitoring as a background task
     # asyncio.create_task(log_ffmpeg_output(ffmpeg_process))
@@ -424,7 +469,7 @@ async def log_ffmpeg_output(process):
     """ Log output from FFmpeg to check for any errors or important information. """
     async for line in process.stderr:
         if line:
-            print("FFMPEG", line.decode().strip())
+            logger.error(f"FFMPEG: {line.decode().strip()}")
     await process.wait()
 
 @app.get("/start-youtube-stream/")
@@ -433,6 +478,10 @@ async def start_youtube_stream():
 
     source_url = config[config["active_source"] + "_url"]
     await start_youtube_stream_directly(source_url)
+
+    config["should_be_streaming"] = True
+    save_config(config)
+
     return {"message": "YouTube stream started"}
 
 @app.get("/stop-youtube-stream/")
@@ -440,8 +489,12 @@ async def stop_youtube_stream():
     global ffmpeg_process
     if ffmpeg_process:
         print("Killing")
-        ffmpeg_process.terminate()
+        ffmpeg_process.kill()
         ffmpeg_process = None
+        await kill_ffmpeg_processes()
+
+        config["should_be_streaming"] = False
+        save_config(config)
 
         await asyncio.sleep(2)
         print("Should be dead")
@@ -472,15 +525,15 @@ async def set_stream_url(stream_data: StreamData):
 async def set_stream_url(config_data: ConfigRequest):
     global config, ffmpeg_process
 
-    if config_data.configKey:
-        config[config_data.configKey] = config_data.configValue
-        save_config(config)
+    for pair in config_data.config:
+        config[pair.configKey] = pair.configValue
 
-        if ffmpeg_process:
-            await start_youtube_stream_directly(config[config["active_source"] + "_url"])
+    save_config(config)
 
-        return {"message": f"{config_data.configKey} updated"}
-    raise HTTPException(status_code=404, detail="Invalid stream identifier")
+    if ffmpeg_process:
+        await start_youtube_stream_directly(config[config["active_source"] + "_url"])
+
+    return {"message": "Configuration updated"}
 
 @app.post("/download-youtube-video/")
 async def download_youtube_video(request: YouTubeDownloadRequest):
@@ -521,6 +574,28 @@ async def validate_stream(name: str = Form(...)):
     else:
         return {"success": True}
         # raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized")
+
+async def kill_ffmpeg_processes():
+    """Kill all running ffmpeg processes."""
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if proc.info['name'] == 'ffmpeg' or (proc.info['cmdline'] and '/usr/bin/ffmpeg' in proc.info['cmdline']):
+                logger.info(f"Killing ffmpeg process: {proc.info}")
+                proc.kill()
+                proc.wait()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+
+async def find_ffmpeg_processes():
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if proc.info['name'] == 'ffmpeg' or (proc.info['cmdline'] and '/usr/bin/ffmpeg' in proc.info['cmdline']):
+                logger.info(f"Killing ffmpeg process: {proc.info}")
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    
+    return False
 
 if __name__ == "__main__":
     import uvicorn
