@@ -2,7 +2,7 @@
 Description=Timer to reboot server every 30 minutes
 
 [Timer]
-OnBootSec=10min
+OnBootSec=1min
 OnUnitActiveSec=30min
 Unit=reboot_server.service
 
