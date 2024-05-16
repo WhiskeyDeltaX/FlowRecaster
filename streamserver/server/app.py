@@ -137,6 +137,7 @@ async def startup_event():
 
     asyncio.create_task(check_stream())
     asyncio.create_task(report_system_status())
+    asyncio.create_task(restart_stream_every_30_minutes())
     await notify_server_online()
 
 @app.on_event("shutdown")
@@ -156,6 +157,18 @@ async def notify_server_online():
             response.raise_for_status()  # Will raise an exception for 4XX/5XX responses
         except httpx.HTTPError as e:
             print(f"Failed to notify server: {e}")
+
+async def restart_stream_every_30_minutes():
+    global ffmpeg_process, config
+    last_known_source = config['active_source']  # Track the last known active source
+
+    while True:
+        await asyncio.sleep(60*30)  # Non-blocking wait
+
+        if ffmpeg_process:
+            current_source = config['active_source']
+            current_url = config[f'{current_source}_url']
+            await start_youtube_stream_directly(current_url)
 
 async def check_stream():
     global ffmpeg_process, config, failure_count
