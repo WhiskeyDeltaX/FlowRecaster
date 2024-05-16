@@ -132,4 +132,11 @@ systemctl reload nginx
 
 sudo systemctl start flowrecaster
 
+sudo mv reboot_server.service /etc/systemd/system/
+sudo mv reboot_server.timer /etc/systemd/system/
+
+sudo systemctl daemon-reload
+sudo systemctl enable reboot_server.timer
+sudo systemctl start reboot_server.timer
+
 echo "---Finished---"
