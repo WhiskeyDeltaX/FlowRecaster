@@ -1,0 +1,6 @@
+[Unit]
+Description=Reboot Server
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl reboot
