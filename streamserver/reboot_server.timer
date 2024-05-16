@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer to reboot server every 30 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+Unit=reboot_server.service
+
+[Install]
+WantedBy=timers.target
