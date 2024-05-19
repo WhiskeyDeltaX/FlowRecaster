@@ -139,13 +139,15 @@ function WorkspaceView() {
 
                     console.log("selectedServer server", selectedServer);
 
-                    setSelectedServer(selectedServer => {
-                        if (selectedServer.uuid === updateServer.uuid) {
-                            return updateServer;
-                        } else {
-                            return selectedServer;
-                        }
-                    });
+                    if (selectedServer) {
+                        setSelectedServer(selectedServer => {
+                            if (selectedServer.uuid === updateServer.uuid) {
+                                return updateServer;
+                            } else {
+                                return selectedServer;
+                            }
+                        });
+                    }
                 }
 
                 return currentStreamServers.slice();
