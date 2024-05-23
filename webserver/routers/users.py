@@ -13,9 +13,13 @@ router = APIRouter()
 
 @router.post("/users", status_code=status.HTTP_201_CREATED)
 async def create_user(user: User):
+    if not os.getenv('ALLOW_REGISTRATION', False):
+        raise HTTPException(status_code=400, detail="Registration not enabled.")
+
     if await users_table.find_one({"email": user.email}):
         print("Email already exists")
-        raise HTTPException(status_code=400, detail="Email already exists")
+        raise HTTPException(status_code=400, detail="Email already exists.")
+
     user_dict = user.dict()
     print("User Dict", user_dict)
     user_dict['uuid'] = str(uuid.uuid4())

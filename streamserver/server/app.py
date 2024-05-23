@@ -431,10 +431,12 @@ async def start_youtube_stream_directly(stream_url):
         return False
 
     cv = "copy"
-    ca = "copy"
+    ca = "aac"
 
     additional_commands = []
     more_additional_commands = []
+
+    additional_commands.append('-af "loudnorm=I=-16:TP=-1.5:LRA=11" -ac 1')
 
     if not stream_url.endswith(".mp4"):
         if "noise_reduction" in config and config["noise_reduction"]:
@@ -603,7 +605,7 @@ async def find_ffmpeg_processes():
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
             if proc.info['name'] == 'ffmpeg' or (proc.info['cmdline'] and '/usr/bin/ffmpeg' in proc.info['cmdline']):
-                logger.info(f"Killing ffmpeg process: {proc.info}")
+                logger.info(f"Checking ffmpeg process: {proc.info}")
                 return True
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
